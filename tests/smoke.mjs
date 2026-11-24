@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {parseCsv,score,DEFAULT_RUBRIC,verifyRubric,rangesForPages,toCsv,assertClass,escapeHtml} from '../docs/core.mjs';
+const list=parseCsv('\uFEFF반,번호,이름\r\n1,1,김민수\r\n1,2,"이,서연"\r\n2,1,박지훈');
+assert.equal(list.length,3);assert.equal(list[1].name,'이,서연');
+assert.throws(()=>parseCsv('반,번호,이름\n1,1,학생\n1,1,중복'),/중복/);
+assert.deepEqual(score({data:{level:'중'},strategy:{level:'기초'},algorithm:{level:'기초'}}),{data:20,strategy:15,algorithm:15,total:50});
+assert.equal(verifyRubric(DEFAULT_RUBRIC),true);
+assert.throws(()=>verifyRubric({...DEFAULT_RUBRIC,strategy:{...DEFAULT_RUBRIC.strategy,scores:{...DEFAULT_RUBRIC.strategy.scores,'기초':26}}}),/순/);
+assert.deepEqual(rangesForPages([{name:'test.pdf',pages:10}],3,4).map(x=>[x.number,x.pageFrom]),[[3,1],[4,6]]);
+assert.throws(()=>rangesForPages([{name:'test.pdf',pages:9}],3,4),/5의 배수/);
+assert.doesNotThrow(()=>assertClass({classNo:1,startNo:1,endNo:30}));
+assert.equal(escapeHtml('<test>'),'&lt;test&gt;');
+assert.ok(toCsv([['반','이름'],[1,'이,서연']]).includes('"이,서연"'));
+console.log('검증 통과: CSV / 배점 / 5쪽 자동 배정 / 범위');

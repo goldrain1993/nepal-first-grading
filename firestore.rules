@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isTeacher() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+    // 교사 권한은 Firebase Console/Admin SDK로만 추가. 스스로 교사 등록 불가.
+    match /teachers/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /classes/{classNo} { allow read, write: if isTeacher(); }
+    match /roster/{studentId} { allow read, write: if isTeacher(); }
+    match /settings/{name} { allow read, write: if isTeacher(); }
+    match /batches/{batchId} { allow read, write: if isTeacher(); }
+    match /submissions/{submissionId} { allow read, write: if isTeacher(); }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

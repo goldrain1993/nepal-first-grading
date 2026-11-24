@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isTeacher() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/teachers/$(request.auth.uid));
+    }
+    match /submissions/{fileName} {
+      allow read: if isTeacher() && fileName.matches('[0-9a-f-]+\\.pdf');
+      allow create, update: if isTeacher()
+        && fileName.matches('[0-9a-f-]+\\.pdf')
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf';
+      allow delete: if isTeacher() && fileName.matches('[0-9a-f-]+\\.pdf');
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

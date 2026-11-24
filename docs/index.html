@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>네팔 홍수 수행평가 | 교사 채점 관리실</title>
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./extras.css" />
+</head>
+<body>
+<div id="loginScreen" class="login-wrap hidden">
+  <div class="login-card">
+    <div class="brand-mark">N<span>·</span></div>
+    <div class="eyebrow">NEPAL LAB · TEACHER ONLY</div>
+    <h1>수행평가 채점 관리실</h1>
+    <p>등록된 교사 계정만 접속할 수 있습니다.</p>
+    <form id="loginForm">
+      <div class="field"><label for="email">교사 이메일</label><input id="email" type="email" required autocomplete="username" /></div>
+      <div class="field"><label for="password">비밀번호</label><input id="password" type="password" required autocomplete="current-password" /></div>
+      <button class="btn primary" type="submit">교사 로그인</button>
+    </form>
+    <div id="loginError" class="error-text" role="alert"></div>
+    <small>관리자가 Firebase Authentication과 teachers 권한을 등록한 계정만 사용할 수 있습니다.</small>
+  </div>
+</div>
+<div id="setupScreen" class="setup-wrap hidden"><div class="setup-card"><h1>Firebase 설정이 필요합니다</h1><p>이 웹앱은 Firebase 연결 후 작동합니다. 배포 전에 <code>docs/firebase-config.js</code>에 Firebase 웹앱 설정을 입력하세요.</p><p>동봉한 <code>README.md</code>를 참고하세요. 학생 자료가 없는 상태에서만 설정하세요.</p></div></div>
+<div class="shell hidden" id="appShell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">N<span>·</span></div><div><strong>NEPAL LAB</strong><small>수행평가 채점 관리실</small></div></div>
+    <div class="nav-group-label">WORKSPACE</div>
+    <nav id="mainNav">
+      <button class="nav active" data-page="dashboard"><span class="nav-icon">▦</span> 대시보드</button>
+      <button class="nav" data-page="upload"><span class="nav-icon">⇧</span> PDF 업로드</button>
+      <button class="nav" data-page="results"><span class="nav-icon">▤</span> 채점 현황</button>
+      <button class="nav" data-page="roster"><span class="nav-icon">♙</span> 학생 명단</button>
+      <button class="nav" data-page="settings"><span class="nav-icon">⚙</span> 설정</button>
+    </nav>
+    <div class="side-bottom"><div class="side-note"><strong>1차 수행평가</strong><span>데이터 분석 · 전략 · 알고리즘</span><div class="weightbar"><i style="width:40%"></i><i style="width:30%"></i><i style="width:30%"></i></div><span>40점 + 30점 + 30점</span></div><small>학생 확인 및 교사 확정이 필수입니다.</small></div>
+  </aside>
+  <div class="content-wrap">
+    <header class="topbar"><div class="mobile-brand">NEPAL LAB</div><div id="crumb" class="crumb">대시보드</div><div class="header-right"><span class="tag warning" id="aiTag">AI 선택 기능</span><span class="user-badge" id="teacherBadge">교사</span><button class="logout-btn" id="logoutBtn">로그아웃</button></div></header>
+    <main class="main" id="content"></main>
+  </div>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+<div id="modal" class="modal-wrap hidden"><div id="modalBox" class="modal"></div></div>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" defer></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

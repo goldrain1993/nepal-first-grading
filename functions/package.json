@@ -1,0 +1,13 @@
+{
+  "name": "nepal-grading-functions",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Teacher-only AI-assisted grading for scanned assessments",
+  "main": "index.js",
+  "engines": {"node": "22"},
+  "scripts": {"test": "node --check index.js"},
+  "dependencies": {
+    "firebase-admin": "^13.5.0",
+    "firebase-functions": "^6.5.0"
+  }
+}
