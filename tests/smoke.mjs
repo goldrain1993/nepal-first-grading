@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {parseCsv,score,DEFAULT_RUBRIC,verifyRubric,rangesForPages,toCsv,assertClass,escapeHtml} from '../docs/core.mjs';
+import {parseCsv,score,DEFAULT_RUBRIC,verifyRubric,rangesForPages,parseMissingNumbers,activeNumbers,toCsv,assertClass,escapeHtml} from '../docs/core.mjs';
 const list=parseCsv('\uFEFF반,번호,이름\r\n1,1,김민수\r\n1,2,"이,서연"\r\n2,1,박지훈');
 assert.equal(list.length,3);assert.equal(list[1].name,'이,서연');
 assert.throws(()=>parseCsv('반,번호,이름\n1,1,학생\n1,1,중복'),/중복/);
@@ -8,6 +8,18 @@ assert.equal(verifyRubric(DEFAULT_RUBRIC),true);
 assert.throws(()=>verifyRubric({...DEFAULT_RUBRIC,strategy:{...DEFAULT_RUBRIC.strategy,scores:{...DEFAULT_RUBRIC.strategy.scores,'기초':26}}}),/순/);
 assert.deepEqual(rangesForPages([{name:'test.pdf',pages:10}],3,4).map(x=>[x.number,x.pageFrom]),[[3,1],[4,6]]);
 assert.throws(()=>rangesForPages([{name:'test.pdf',pages:9}],3,4),/5의 배수/);
+assert.deepEqual(parseMissingNumbers('3, 8, 23-25',1,30),[3,8,23,24,25]);
+assert.deepEqual(parseMissingNumbers('',1,30),[]);
+assert.throws(()=>parseMissingNumbers('3, 99',1,30),/밖/);
+assert.throws(()=>parseMissingNumbers('3,,4',1,30),/형식/);
+assert.throws(()=>parseMissingNumbers('23-21',1,30),/밖/);
+const boysGirls={classNo:1,startNo:1,endNo:24,missingNos:[3,19,20,22]};
+assert.deepEqual(activeNumbers(boysGirls,18,24),[18,21,23,24]);
+assert.deepEqual(rangesForPages([{name:'students.pdf',pages:20}],18,24,boysGirls.missingNos).map(x=>[x.number,x.pageFrom]),[[18,1],[21,6],[23,11],[24,16]]);
+assert.throws(()=>rangesForPages([{name:'students.pdf',pages:25}],18,24,boysGirls.missingNos),/결번 제외 학생 4명/);
+assert.throws(()=>rangesForPages([{name:'students.pdf',pages:5}],19,20,boysGirls.missingNos),/결번만/);
+assert.throws(()=>assertClass({classNo:1,startNo:1,endNo:30,missingNos:[32]}),/결번/);
+
 assert.doesNotThrow(()=>assertClass({classNo:1,startNo:1,endNo:30}));
 assert.equal(escapeHtml('<test>'),'&lt;test&gt;');
 assert.ok(toCsv([['반','이름'],[1,'이,서연']]).includes('"이,서연"'));
