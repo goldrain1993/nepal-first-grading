@@ -20,5 +20,11 @@ jobs:
           node --check docs/app.js
           node --check docs/core.mjs
           node --check docs/roster-excel.mjs
+          node --check docs/page-grouping.mjs
+          node --check docs/flexible-upload.mjs
+          node --check functions/index.js
+          node --check functions/test-rules.js
       - name: Excel roster and PDF assignment tests
         run: node tests/smoke.mjs
+      - name: Variable pages and grading rules
+        run: node tests/page-grading.mjs
