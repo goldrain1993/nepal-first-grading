@@ -44,3 +44,58 @@ exports.gradeAnswer=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSeco
   await sref.update({aiGrade:grades,aiSummary:clean(result.summary,2500),aiUncertain:Array.isArray(result.uncertain_fields)?result.uncertain_fields.slice(0,12).map(v=>clean(v,200)):[],recognizedNo,recognizedName,recognizedConfidence:confidence,identityStatus:row.identityConfirmed?'교사 확인':identityStatus,aiStatus:'AI 완료',testValueChecks:testChecks,updatedAt:admin.firestore.FieldValue.serverTimestamp()});
   return {ok:true,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches},grades};
 });
+
+
+// 학생 이름이 있는 첫 장과 STEP을 이미지에서 판독하는 AI 페이지 분류기.
+// 교사의 직접 실행/확인 필요, 스캔본 이미지가 외부 AI에 전송됨.
+exports.inspectPages=onCall({
+  region:'asia-northeast3',memory:'512MiB',timeoutSeconds:120,maxInstances:2,secrets:[OPENAI_API_KEY]
+},async request=>{
+  if(!request.auth?.uid)throw new HttpsError('unauthenticated','교사 로그인이 필요합니다.');
+  const teacher=await admin.firestore().doc('teachers/'+request.auth.uid).get();
+  if(!teacher.exists)throw new HttpsError('permission-denied','교사 권한이 없습니다.');
+  const images=request.data?.images;
+  if(!Array.isArray(images)||images.length<1||images.length>6||
+      images.some(v=>typeof v!=='string'||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v)||v.length>1500000)||
+      images.reduce((sum,v)=>sum+v.length,0)>8000000)
+    throw new HttpsError('invalid-argument','한 번에 1~6쪽, 이미지당 1.5MB 이하로 전송하세요.');
+  const content=[{type:'text',text:[
+    '당신은 수행평가 종이 PDF의 페이지 역할을 분류합니다. 각 이미지는 원본 한 쪽입니다.',
+    '페이지 사이에 누락된 장이 있을 수 있으며 학생당 1~5장입니다. 5쪽씩 잘라 판단하면 안 됩니다.',
+    'front = 새로운 학생의 첫 장(학번과 이름을 기재하는 영역 + STEP 1 데이터 수집·분석 시작).',
+    'data-cont = STEP 1 계속, O/X 특징과 반례 찾기.',
+    'strategy = STEP 2 문제 해결 전략, 센서와 임계값 3개.',
+    'algorithm = STEP 3 알고리즘 설계, 입력 처리 출력과 순서.',
+    'test = STEP 4 내 알고리즘 시험하기, TEST 값 및 위험신호.',
+    'unknown = 역할이 불분명한 경우. 불명확하면 추정하지 말고 unknown을 선택합니다.',
+    '오직 front인 페이지에서만 학번과 손글씨 이름을 인식합니다. 확인되지 않으면 빈 문자열.',
+    '각 입력 이미지 순서대로 정확히 같은 길이의 pages 배열을 반환해야 합니다.',
+    'JSON 예: {"pages":[{"role":"front","studentNo":"1","studentName":"김OO","confidence":"높음","reason":"학번 이름 및 STEP 1 확인"}]}',
+    'role=front|data-cont|strategy|algorithm|test|unknown, confidence=높음|보통|낮음.'
+  ].join('\n')}];
+  images.forEach((src,i)=>{
+    content.push({type:'text',text:'원본 페이지 '+(i+1)});
+    content.push({type:'image_url',image_url:{url:src,detail:'high'}});
+  });
+  let result;
+  try{
+    const resp=await fetch('https://api.openai.com/v1/chat/completions',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+OPENAI_API_KEY.value(),'Content-Type':'application/json'},
+      body:JSON.stringify({model:'gpt-4.1-mini',messages:[{role:'user',content}],response_format:{type:'json_object'},max_tokens:1800,temperature:0})
+    });
+    const json=await resp.json();
+    if(!resp.ok)throw Error('OpenAI API 상태 '+resp.status+': '+clean(json?.error?.message,100));
+    result=JSON.parse(json.choices?.[0]?.message?.content||'{}');
+  }catch(e){throw new HttpsError('unavailable','페이지 판별 실패: '+clean(e.message,150));}
+  if(!Array.isArray(result.pages)||result.pages.length!==images.length)
+    throw new HttpsError('internal','AI 결과에서 페이지 수가 일치하지 않습니다.');
+  const allowed=['front','data-cont','strategy','algorithm','test','unknown'];
+  return {pages:result.pages.map(p=>({
+    role:allowed.includes(p.role)?p.role:'unknown',
+    studentNo:clean(p.studentNo,24),
+    studentName:clean(p.studentName,60),
+    confidence:['높음','보통','낮음'].includes(p.confidence)?p.confidence:'낮음',
+    reason:clean(p.reason,120)
+  }))};
+});
