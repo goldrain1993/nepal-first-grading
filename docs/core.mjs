@@ -96,7 +96,8 @@ export function inferClassesFromRoster(items){
 }
 
 export function rangesForPages(files,startNo,endNo,missingNos=[]){
-  const numbers=activeNumbers({classNo:1,startNo,endNo,missingNos});
+  const withinRange=missingNos.filter(n=>n>=startNo&&n<=endNo);
+  const numbers=activeNumbers({classNo:1,startNo,endNo,missingNos:withinRange});
   const expected=numbers.length;
   if(!expected)throw Error('선택한 범위에는 결번만 있습니다. 실제 학생이 있는 번호를 선택하세요.');
   const chunks=[];let index=0;
