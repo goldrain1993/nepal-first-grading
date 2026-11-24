@@ -42,6 +42,80 @@ function renderDashboard(){const registered=state.roster.length,uploaded=state.s
  $('refreshBtn').onclick=()=>nav('dashboard');$('startUpload').onclick=()=>nav('upload');document.querySelectorAll('[data-batch]').forEach(e=>e.onclick=()=>{ui.resultsClass=String(e.dataset.class);nav('results')});}
 function batchTable(list){if(!list.length)return '<div class="empty"><div class="emoji">▤</div>업로드된 답안이 없습니다.</div>';return `<div class="table-wrap"><table><thead><tr><th>날짜</th><th>학급</th><th>번호 범위</th><th>답안</th><th>확정</th><th>상태</th><th></th></tr></thead><tbody>${list.map(b=>{const subs=state.submissions.filter(s=>s.batchId===b.id);return `<tr><td class="muted">${esc(dateText(b.createdAt))}</td><td>${b.classNo}반</td><td>${b.startNo}–${b.endNo}번</td><td>${subs.length}명</td><td>${subs.filter(s=>s.finalized).length}/${subs.length}</td><td>${badge(b.status==='완료'?'success':'warning',b.status||'검토 대기')}</td><td><button class="btn link" data-batch="${b.id}" data-class="${b.classNo}">확인</button></td></tr>`}).join('')}</tbody></table></div>`}
 
+
+let excelPending=null;
+function schoolExcelPanel(){
+ return '<div class="panel excel-import-panel">'+
+ '<div class="panel-head"><h2>엑셀로 학급·학생 명단 일괄 등록</h2><span class="tag info">1학년 전용</span></div>'+
+ '<p class="thin-note">엑셀 첫 시트의 <strong>학년 · 반 · 번호 · 이름</strong>을 입력하면 각 반의 남학생(1~20번)·여학생(21번부터) 시작·끝 번호, 결번, 실제 학생 수를 자동 계산하고 이름까지 저장합니다.</p>'+
+ '<div class="toolbar excel-import-actions"><button type="button" class="btn secondary" id="downloadSchoolXlsx">↓ 엑셀 양식 다운로드 (.xlsx)</button>'+
+ '<input type="file" class="control" id="schoolXlsx" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">'+
+ '<button type="button" class="btn primary" id="previewSchoolXlsx">엑셀 검사·미리보기</button></div>'+
+ '<p class="thin-note">해당 반의 <strong>재학생 전원</strong>을 입력해야 결번이 정확하게 계산됩니다. 번호가 없으면 그 번호를 결번으로 처리하며, 다른 반의 자료는 유지합니다.</p>'+
+ '<div id="excelPreview" class="excel-preview" role="status"></div>'+
+ '<button type="button" class="btn primary" id="commitSchoolXlsx" disabled>확인 후 학급·명단 저장</button>'+
+ '<p class="thin-note attention">학생 답안이 이미 등록된 학급의 명단 교체는 안전을 위해 차단합니다. 정식 학생 개인정보 사용 전 학교 보안 지침을 확인하세요.</p>'+
+ '</div>';
+}
+function bindSchoolExcelPanel(){
+ const previewBtn=$('previewSchoolXlsx'),commitBtn=$('commitSchoolXlsx'),fileInput=$('schoolXlsx'),area=$('excelPreview');
+ if(!previewBtn)return;
+ excelPending=null;
+ $('downloadSchoolXlsx').onclick=()=>safe(async()=>downloadSchoolExcelTemplate());
+ fileInput.onchange=()=>{excelPending=null;commitBtn.disabled=true;area.textContent='';};
+ previewBtn.onclick=()=>safe(async()=>{
+  const file=fileInput.files?.[0];if(!file)throw Error('엑셀(.xlsx) 파일을 먼저 선택하세요.');
+  previewBtn.disabled=true;area.textContent='엑셀을 읽어 학급·결번·인원을 계산하고 있습니다…';
+  try{
+   const incoming=await readSchoolExcel(file);
+   const affected=new Set(incoming.classes.map(x=>x.classNo));
+   if(new Set([...state.classes.map(c=>c.classNo),...affected]).size>50)throw Error('저장된 학급과 합쳐서 50개 반을 초과합니다.');
+   const allNew=new Map(incoming.students.map(x=>[x.classNo+'-'+x.number,x]));
+   const removed=state.roster.filter(x=>affected.has(x.classNo)&&!allNew.has(x.classNo+'-'+x.number));
+   const changed=incoming.students.filter(x=>{const old=student(x.classNo,x.number);return old&&old.name!==x.name;});
+   const newCount=incoming.students.filter(x=>!student(x.classNo,x.number)).length;
+   const locked=state.submissions.filter(x=>affected.has(x.classNo));
+   const cell=v=>v??'—';
+   const rows=incoming.classes.map(c=>
+     '<tr><td>'+c.gradeNo+'학년 '+c.classNo+'반</td><td>'+cell(c.boysStart)+'</td><td>'+cell(c.boysEnd)+'</td>'+
+     '<td>'+cell(c.girlsStart)+'</td><td>'+cell(c.girlsEnd)+'</td><td>'+c.missingNos.join(', ')+'</td>'+
+     '<td><strong>'+activeNumbers(c).length+'명</strong></td></tr>').join('');
+   area.innerHTML='<div class="result-stats">엑셀 '+incoming.students.length+'명 · '+incoming.classes.length+'개 반 · 신규 '+newCount+'명 · 이름 변경 '+changed.length+'명 · 기존 명단에서 제외 '+removed.length+'명</div>'+
+    '<div class="table-wrap"><table class="small-table"><thead><tr><th>학급</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>결번</th><th>학생 수</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    (locked.length?'<p class="notice warn">이미 답안이 등록된 학급이 있습니다. 해당 학급의 명단은 엑셀로 교체할 수 없습니다.</p>':
+    (removed.length||changed.length?'<p class="notice warn">기존 학생 이름 '+changed.length+'건이 수정되고 '+removed.length+'건이 삭제될 예정입니다. 반드시 전체 명단인지 확인하세요.</p>':
+    '<p class="notice good">학생별 번호가 중복되지 않으며 명단을 등록할 수 있습니다.</p>'));
+   excelPending={...incoming,filename:file.name};
+   commitBtn.disabled=locked.length>0;
+  }catch(e){excelPending=null;commitBtn.disabled=true;area.textContent='엑셀 확인 실패: '+e.message;throw e;}
+  finally{previewBtn.disabled=false;}
+ });
+ commitBtn.onclick=()=>safe(async()=>{
+  const incoming=excelPending;if(!incoming)throw Error('엑셀 검사·미리보기를 먼저 실행하세요.');
+  commitBtn.disabled=true;
+  try{
+   await loadAll();
+   const affected=new Set(incoming.classes.map(x=>x.classNo));
+   if(state.submissions.some(s=>affected.has(s.classNo)))throw Error('해당 학급에 이미 답안이 있어 명단 교체를 차단했습니다.');
+   if(new Set([...state.classes.map(c=>c.classNo),...affected]).size>50)throw Error('최대 50개 학급까지 등록할 수 있습니다.');
+   const incomingById=new Map(incoming.students.map(x=>[x.classNo+'-'+x.number,x]));
+   const removed=state.roster.filter(x=>affected.has(x.classNo)&&!incomingById.has(x.classNo+'-'+x.number));
+   const changed=incoming.students.filter(x=>{const old=student(x.classNo,x.number);return !old||old.name!==x.name;});
+   const opCount=incoming.classes.length+removed.length+changed.length;
+   if(opCount>450)throw Error('한 번에 변경할 자료가 450건을 초과합니다. 반별로 엑셀을 나눠 등록해 주세요.');
+   const question='엑셀에 포함된 '+incoming.classes.length+'개 반, 학생 '+incoming.students.length+'명을 기준으로 학급 범위·결번·명단을 설정합니다. 기존 이름 '+removed.length+'건이 삭제되고 '+changed.length+'건이 추가·변경됩니다. 입력한 파일이 해당 반의 전체 학생 명단이 맞습니까?';
+   if(!await ask('엑셀 일괄 등록 확인',question,'학급·명단 저장'))return;
+   const batch=writeBatch(db);
+   for(const c of incoming.classes)batch.set(doc(db,'classes',String(c.classNo)),c);
+   for(const x of removed)batch.delete(doc(db,'roster',x.classNo+'-'+x.number));
+   for(const x of changed)batch.set(doc(db,'roster',x.classNo+'-'+x.number),{gradeNo:1,classNo:x.classNo,number:x.number,name:x.name});
+   await batch.commit();
+   excelPending=null;toast('엑셀 등록 완료: '+incoming.classes.length+'개 반 · '+incoming.students.length+'명 (결번 자동 반영)');
+   await nav('roster');
+  }finally{if($('commitSchoolXlsx'))$('commitSchoolXlsx').disabled=!excelPending;}
+ });
+}
+
 function renderSettings(){const classes=state.classes.length?state.classes:Array.from({length:11},(_,i)=>({classNo:i+1,startNo:1,endNo:30}));main(heading('CLASS & RUBRIC','학급·채점 기준 설정','학급별 남학생(1~20번)·여학생(21번 이후) 번호 범위와 결번을 설정합니다.')+
  `<div class="panel"><div class="panel-head"><h2>학급별 번호 및 결번 설정</h2><div class="sub-actions">${button('addClass','＋ 학급 추가')}${button('saveClasses','학급 저장','primary')}</div></div><div class="table-wrap"><table class="class-table small-table"><thead><tr><th>반</th><th>시작 번호</th><th>마지막 번호</th><th>결번 번호 (쉼표·범위)</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>실제 학생 수 (자동 계산)</th><th>등록 학생</th><th></th></tr></thead><tbody id="classRows">${classes.map(c=>classRow(c)).join('')}</tbody></table></div><div class="rubric-note class-count-summary" id="classCountSummary" aria-live="polite"></div><div class="rubric-note">실제 학생 수는 마지막 번호 − 시작 번호 + 1 − 결번 수로 자동 계산되며, 값 입력 즉시 갱신됩니다. 30번은 최초 예시값으로 수정 가능합니다. 남학생 번호는 1~20번, 여학생 번호는 21번부터 표시합니다. 결번 예: 3, 8, 23-25. 결번에는 학생 이름이나 PDF를 배정하지 않습니다. 등록된 학생·답안이 있는 번호는 결번으로 바꿀 수 없습니다.</div></div>
  <div class="panel"><div class="panel-head"><h2>수준별 점수 설정</h2>${button('saveRubric','배점 저장','primary')}</div><div class="notice warn">아래 배점은 임시값입니다. 학교의 확정된 수행평가 평가계획과 반드시 대조하여 사용하세요.</div><div class="table-wrap" style="margin-top:15px"><table class="rubric-table small-table"><thead><tr><th>영역</th>${LEVELS.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${AREA_KEYS.map(a=>`<tr><td>${esc(state.rubric[a].name)} (${state.rubric[a].max}점)</td>${LEVELS.map(l=>`<td><input type="number" class="rubric-input" data-area="${a}" data-level="${l}" min="0" max="${state.rubric[a].max}" value="${state.rubric[a].scores[l]}"></td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="rubric-note">확정된 학생의 점수는 저장 당시 점수로 고정됩니다. 기준 변경 후에는 기존 미확정 점수도 다시 확인하세요.</p></div>`);
