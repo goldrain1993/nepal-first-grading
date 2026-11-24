@@ -13,7 +13,7 @@ export function parseMissingNumbers(input,startNo,endNo){
   const text=String(input??'').trim();if(!text)return [];
   const found=new Set();
   for(const raw of text.split(/[,，]/)){
-    const token=raw.trim();const match=token.match(/^(\\d{1,2})(?:\\s*[-~]\\s*(\\d{1,2}))?$/);
+    const token=raw.trim();const match=token.match(/^(\d{1,2})(?:\s*[-~]\s*(\d{1,2}))?$/);
     if(!match)throw Error(`결번 입력 형식이 올바르지 않습니다: ${raw||'(빈 항목)'} (예: 3, 8, 23-25)`);
     const a=Number(match[1]),b=match[2]?Number(match[2]):a;
     if(a>b||a<startNo||b>endNo)throw Error(`결번 ${raw}은(는) 학급 번호 범위 ${startNo}~${endNo} 밖입니다.`);
