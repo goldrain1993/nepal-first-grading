@@ -24,3 +24,19 @@
 .excel-preview .notice{margin:10px 0}
 .class-table [data-gender-range]{font-variant-numeric:tabular-nums;font-weight:750;color:#234f79}
 .class-table{min-width:1050px}
+
+/* 학생별 최대 5장: 페이지 시작·STEP 확인 */
+#fuReview[hidden]{display:none!important}
+#fuReview .flexible-page-table{min-width:820px}
+.flexible-page-table td{vertical-align:middle!important}
+.flexible-page-table td:first-child small{display:block;font-size:11px;color:#6b7c90;max-width:210px;overflow-wrap:anywhere}
+.flexible-page-table select{min-width:205px;font-size:12px}
+.flexible-page-table input[type="checkbox"]{width:18px;height:18px}
+.scan-thumb{max-width:94px;width:80px;height:auto;border:1px solid #cbd5e1;border-radius:6px;cursor:zoom-in;background:white}
+#fuStatus,#fuExpected{line-height:1.65}
+#fuGroupSummary{line-height:1.7;margin:14px 0;overflow:auto}
+#fuGroupSummary .table-wrap{max-height:400px;overflow:auto}
+#fuGroupSummary table{min-width:760px}
+#fuGroupSummary td{font-size:12px;word-break:break-word}
+.page-zoom-overlay{position:fixed;inset:0;background:rgba(9,23,44,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;gap:10px;padding:25px;overflow-y:auto;cursor:zoom-out}
+.page-zoom-overlay img{max-width:min(95vw,1400px);height:auto;background:white;object-fit:contain}
