@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {parseCsv,score,DEFAULT_RUBRIC,verifyRubric,rangesForPages,parseMissingNumbers,activeNumbers,toCsv,assertClass,escapeHtml} from '../docs/core.mjs';
+import {parseCsv,score,DEFAULT_RUBRIC,verifyRubric,rangesForPages,parseMissingNumbers,activeNumbers,genderRangesForClass,parseXlsxRosterRows,inferClassesFromRoster,toCsv,assertClass,escapeHtml} from '../docs/core.mjs';
 const list=parseCsv('\uFEFF반,번호,이름\r\n1,1,김민수\r\n1,2,"이,서연"\r\n2,1,박지훈');
 assert.equal(list.length,3);assert.equal(list[1].name,'이,서연');
 assert.throws(()=>parseCsv('반,번호,이름\n1,1,학생\n1,1,중복'),/중복/);
@@ -23,4 +23,30 @@ assert.throws(()=>assertClass({classNo:1,startNo:1,endNo:30,missingNos:[32]}),/�
 assert.doesNotThrow(()=>assertClass({classNo:1,startNo:1,endNo:30}));
 assert.equal(escapeHtml('<test>'),'&lt;test&gt;');
 assert.ok(toCsv([['반','이름'],[1,'이,서연']]).includes('"이,서연"'));
-console.log('검증 통과: CSV / 배점 / 5쪽 자동 배정 / 범위');
+
+const excelRows=[
+  ['학년','반','번호','이름'],
+  [1,1,1,'테스트 남학생1'],
+  [1,1,3,'테스트 남학생3'],
+  [1,1,21,'테스트 여학생21'],
+  [1,1,23,'테스트 여학생23'],
+  [1,2,21,'여학생만 있는 반'],
+  [1,2,22,'여학생만 있는 반 2']
+];
+const excelStudents=parseXlsxRosterRows(excelRows);
+assert.equal(excelStudents.length,6);
+const inferred=inferClassesFromRoster(excelStudents);
+assert.deepEqual(inferred.map(x=>x.classNo),[1,2]);
+assert.deepEqual(inferred[0].missingNos,[2,...Array.from({length:17},(_,i)=>4+i),22]);
+assert.deepEqual([inferred[0].boysStart,inferred[0].boysEnd,inferred[0].girlsStart,inferred[0].girlsEnd],[1,3,21,23]);
+assert.equal(activeNumbers(inferred[0]).length,4);
+assert.deepEqual([inferred[1].boysStart,inferred[1].boysEnd,inferred[1].girlsStart,inferred[1].girlsEnd],[null,null,21,22]);
+assert.deepEqual(inferred[1].missingNos,[]);
+assert.deepEqual(genderRangesForClass({classNo:3,startNo:1,endNo:5,missingNos:[]}),{boysStart:1,boysEnd:5,girlsStart:null,girlsEnd:null});
+assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[2,1,1,'타학년']]),/1학년 전용/);
+assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[1,1,1,'갑'],[1,1,1,'을']]),/중복/);
+assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[1,1,1,'']]),/모두 입력/);
+assert.throws(()=>parseXlsxRosterRows([['반','학년','번호','이름'],[1,1,1,'갑']]),/첫 행/);
+assert.deepEqual(rangesForPages([{name:'test.pdf',pages:20}],1,23,inferred[0].missingNos).map(x=>x.number),[1,3,21,23]);
+
+console.log('검증 통과: CSV / XLSX 명단 / 남녀 번호 구간 / 자동 결번 / 5쪽 배정 / 배점');
