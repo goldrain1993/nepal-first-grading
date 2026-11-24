@@ -10,7 +10,8 @@ const label=(v)=>String(v??'—');
 const roleOptions=(selected)=>[['unknown','판별 필요'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
 async function thumbnail(p,scale=0.36){
  const page=await p.view.getPage(p.pageNo);
- const vp=page.getViewport({scale:Math.min(scale,550/page.getViewport({scale:1}).width)});
+ const maxWidth=scale>1.3?1500:scale>0.7?1050:550;
+ const vp=page.getViewport({scale:Math.min(scale,maxWidth/page.getViewport({scale:1}).width)});
  const canvas=document.createElement('canvas');
  canvas.width=Math.max(1,Math.round(vp.width));canvas.height=Math.max(1,Math.round(vp.height));
  await page.render({canvasContext:canvas.getContext('2d'),canvas,viewport:vp}).promise;
@@ -38,7 +39,7 @@ export function renderFlexibleUpload(ctx){
  '<input class="control" type="file" id="fuFiles" accept=".pdf,application/pdf" multiple>'+
  '<p class="help-text">PDF 한 개에 여러 학생 답안이 들어 있어도 됩니다. 총 페이지 수가 5의 배수가 아니어도 됩니다. 스캔 PDF에서 이름·STEP이 자동 판독되지 않으면 수동 확인하세요.</p>'+
  '<div class="sub-actions"><button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
- '<button class="btn secondary" id="fuAiScan" disabled>AI로 이름·STEP 자동 판별 (외부 API·비용)</button></div>'+
+ '<button class="btn secondary" id="fuAiScan" disabled>AI로 이름·STEP 자동 판별 (Cloud Functions 배포 필요·비용)</button></div>'+
  '<p id="fuStatus" class="help-text" role="status"></p></div>'+
  '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. 페이지별 분리·정렬 확인</h2></div>'+
  '<p class="notice warn">이름이 적힌 첫 장마다 "새 학생 시작"을 선택하세요. 장마다 STEP을 확인하면 STEP 1 → STEP 1 계속 → STEP 2 → STEP 3 → STEP 4로 자동 정렬합니다. AI 판독이 틀렸을 때는 직접 수정할 수 있습니다.</p>'+
@@ -102,11 +103,11 @@ export function renderFlexibleUpload(ctx){
   el('fuPageRows').querySelectorAll('[data-start]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.start)];p.start=input.checked;
    if(p.start)p.role='front';else if(p.role==='front')p.role='unknown';
-   drawUpdatedSelectors();checkGroups();
+   el('fuConfirm').checked=false;drawUpdatedSelectors();checkGroups();
   });
   el('fuPageRows').querySelectorAll('[data-role]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.role)];p.role=input.value;p.start=p.role==='front';
-   drawUpdatedSelectors();checkGroups();
+   el('fuConfirm').checked=false;drawUpdatedSelectors();checkGroups();
   });
   el('fuPageRows').querySelectorAll('[data-preview]').forEach(img=>img.onclick=()=>safe(async()=>{
    const p=session.pages[Number(img.dataset.preview)];
@@ -165,7 +166,7 @@ export function renderFlexibleUpload(ctx){
     const chunk=session.pages.slice(offset,offset+6);
     report('AI가 '+(offset+1)+'~'+(offset+chunk.length)+'쪽을 판별하는 중…');
     const images=[];
-    for(const p of chunk){images.push(await thumbnail(p,0.95));}
+    for(const p of chunk){images.push(await thumbnail(p,1.6));}
     const response=await callable({images});
     const detected=response.data?.pages||[];
     if(detected.length!==chunk.length)throw Error('AI 응답의 페이지 수가 일치하지 않습니다.');
