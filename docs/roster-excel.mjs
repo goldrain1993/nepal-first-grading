@@ -11,7 +11,7 @@ export async function readSchoolExcel(file){
   const XLSX=xlsxLib();
   const bytes=await file.arrayBuffer();
   let wb;
-  try{wb=XLSX.read(bytes,{type:'array',bookVBA:false,cellFormula:true,sheetRows:5002});}
+  try{wb=XLSX.read(bytes,{type:'array',bookVBA:false,cellFormula:true});}
   catch(e){throw Error('엑셀 파일을 읽을 수 없습니다. 올바른 .xlsx 파일인지 확인하세요.');}
   const sheetName=wb.SheetNames.includes('학생명단')?'학생명단':wb.SheetNames[0];
   const ws=wb.Sheets[sheetName];
