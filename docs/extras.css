@@ -11,3 +11,16 @@
 .class-student-count{display:inline-block;min-width:56px;color:#1452a2;font-size:13px;font-weight:800;white-space:nowrap}
 .class-student-count.count-invalid{color:#b42318}
 .class-count-summary{font-weight:750;color:#234f79;margin:12px 0}
+
+/* Excel 학급·명단 일괄 등록 */
+.excel-import-panel{margin-bottom:18px}
+.excel-import-panel .panel-head{align-items:center;gap:12px}
+.excel-import-actions{gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+.excel-import-actions input[type="file"]{min-width:230px;max-width:420px}
+.excel-preview{margin:12px 0;max-height:420px;overflow:auto}
+.excel-preview table td,.excel-preview table th{text-align:center;white-space:nowrap}
+.excel-preview table td:first-child,.excel-preview table th:first-child{text-align:left}
+.excel-preview .result-stats{padding:8px 0 12px;font-weight:700;color:#275781}
+.excel-preview .notice{margin:10px 0}
+.class-table [data-gender-range]{font-variant-numeric:tabular-nums;font-weight:750;color:#234f79}
+.class-table{min-width:1050px}
