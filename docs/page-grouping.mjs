@@ -4,12 +4,42 @@ export const ROLE_NAMES={front:'STEP 1 첫 장(학번·이름)', 'data-cont':'ST
 
 export function inferPageRole(text){
  const t=String(text||'').replace(/\s+/g,' ').toUpperCase();
- if(/STEP\s*1\s*(계속|CONT)/i.test(t))return 'data-cont';
- if(/STEP\s*2\b/i.test(t))return 'strategy';
- if(/STEP\s*3\b/i.test(t))return 'algorithm';
- if(/STEP\s*4\b/i.test(t))return 'test';
- if(/STEP\s*1\b/i.test(t)&&(/학\s*번/.test(t)&&/이\s*름/.test(t)))return 'front';
+ const normalized=t.replace(/[·.:\-_]/g,' ');
+ // 2026년 수행평가지 공식 5쪽의 인쇄 제목을 우선 사용한다.
+ if(/STEP\s*1\s*(계속|CONT)/i.test(t)||/데이터에서\s*특징\s*찾기/.test(t))return 'data-cont';
+ if(/STEP\s*2\b/i.test(t)||/문제\s*해결\s*전략\s*선택/.test(t))return 'strategy';
+ if(/STEP\s*3\b/i.test(t)||/알고리즘\s*설계\s*\[?\s*30점/.test(t))return 'algorithm';
+ if(/STEP\s*4\b/i.test(t)||/내\s*알고리즘\s*시험하기/.test(t))return 'test';
+ if(/STEP\s*1\b/i.test(t)&&( /학\s*번/.test(t)&&/이\s*름/.test(t)||/데이터\s*수집/.test(t)))return 'front';
+ // STEP 제목 추출이 누락된 디지털 PDF에만 문항 구조로 보조 추정한다.
+ if(/TEST\s*값/.test(t)&&/위험\s*신호/.test(t)&&/최종\s*결과|경보|정상/.test(t))return 'test';
+ if(/입력\s*처리\s*출력/.test(normalized)&&/알고리즘을\s*순서대로|5단계/.test(t))return 'algorithm';
+ if(/위험\s*기준값/.test(t)&&/근거\s*사례/.test(t)&&/센서\s*3개/.test(t))return 'strategy';
+ if(/홍수\s*O\s*사례/.test(t)&&/반례/.test(t)&&/특징/.test(t))return 'data-cont';
+ if(/학\s*번/.test(t)&&/이\s*름/.test(t)&&/데이터뱅크/.test(t))return 'front';
  return 'unknown';
+}
+// AI는 인쇄 양식과 문항·배치를 참고해 STEP을 분류한다. 불확실한 결과는
+// 임의로 학생에게 연결하지 않으며 수동 확인 대상으로 유지한다.
+export function applyVisualPageResult(page,result){
+ const role=PAGE_ROLES.includes(result?.role)?result.role:'unknown';
+ const confidence=['높음','보통','낮음'].includes(result?.confidence)?result.confidence:'낮음';
+ const valid=role!=='unknown'&&confidence!=='낮음';
+ if(!page.manualEdited){
+  page.role=valid?role:'unknown';
+  page.start=page.role==='front';
+ }
+ page.aiRole=role;
+ page.confidence=confidence;
+ page.recognizedNo=String(result?.studentNo||'').trim().slice(0,24);
+ page.recognizedName=String(result?.studentName||'').trim().slice(0,60);
+ const reason=String(result?.reason||'').trim().slice(0,160);
+ page.detected='AI 이미지 판별 · '+confidence+(valid?'':' · 교사 확인 필요')+
+  (reason?' · '+reason:'')+
+  (page.recognizedNo?' · 번호 '+page.recognizedNo:'')+
+  (page.recognizedName?' · 이름 '+page.recognizedName:'');
+ page.visualChecked=true;
+ return valid;
 }
 export function groupPages(pages,studentNumbers){
  if(!Array.isArray(pages)||!pages.length)throw Error('PDF 페이지를 분석한 뒤 학생별 시작 위치를 확인하세요.');
