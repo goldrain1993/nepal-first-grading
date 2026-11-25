@@ -69,7 +69,7 @@ export function renderFlexibleUpload(ctx){
  };
  el('fuStart').oninput=updateExpected;el('fuEnd').oninput=updateExpected;
  const report=s=>{if(el('fuStatus'))el('fuStatus').textContent=s};
- let analysisBusy=false;
+ let analysisBusy=false,visualBusy=false,visualCancel=false;
  const resetReview=()=>{
   session=null;
   el('fuReview').hidden=true;
@@ -164,24 +164,90 @@ export function renderFlexibleUpload(ctx){
    el('fuUpload').disabled=true;
   }
  }
+
+ function updateReviewFilter(){
+  const only=el('fuOnlyNeedsReview')?.checked;
+  if(!session||!el('fuPageRows'))return;
+  el('fuPageRows').querySelectorAll('tr[data-page-index]').forEach(row=>{
+   const p=session.pages[Number(row.dataset.pageIndex)];
+   row.hidden=!!only&&p.role!=='unknown'&&p.confidence!=='보통'&&p.confidence!=='낮음';
+  });
+ }
+ async function runVisualClassification(){
+  if(!session)throw Error('먼저 PDF 장별 분석을 완료하세요.');
+  if(visualBusy)throw Error('AI 페이지 판별이 이미 진행 중입니다.');
+  const candidates=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
+  if(!candidates.length){
+   report('이미 판별된 STEP은 유지했습니다. 재검토할 페이지가 없습니다. 분류를 직접 수정할 수 있습니다.');
+   return;
+  }
+  const hadAnalysisLock=analysisBusy;
+  visualBusy=true;visualCancel=false;analysisBusy=true;
+  const scanBtn=el('fuAiScan'),stopBtn=el('fuStopAi');
+  if(scanBtn)scanBtn.disabled=true;
+  if(stopBtn){stopBtn.hidden=false;stopBtn.disabled=false;}
+  for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
+    const field=el(id);if(field)field.disabled=true;
+  }
+  let analyzed=0,high=0,medium=0,unresolved=0;
+  try{
+   const callable=httpsCallable(ctx.functions,'inspectPages',{timeout:120000});
+   for(let offset=0;offset<candidates.length;offset+=6){
+    if(visualCancel)break;
+    const chunk=candidates.slice(offset,offset+6);
+    report('AI가 스캔 이미지의 STEP·문항·학번 칸을 판별 중: '+(offset+1)+'~'+(offset+chunk.length)+'/'+candidates.length+'쪽');
+    const images=[];
+    for(const p of chunk)images.push(await thumbnail(p,1.5));
+    const response=await callable({images});
+    const results=response.data?.pages;
+    if(!Array.isArray(results)||results.length!==chunk.length)throw Error('AI의 페이지별 판별 결과 수가 맞지 않습니다.');
+    for(let i=0;i<chunk.length;i++){
+      const p=chunk[i],success=applyVisualPageResult(p,results[i]);
+      analyzed++;
+      if(success){if(p.confidence==='높음')high++;else medium++;}
+      else unresolved++;
+    }
+    drawPageRows();
+    report('AI 이미지 분석 '+analyzed+'/'+candidates.length+'쪽 · 높음 '+high+' · 보통 '+medium+' · 판별 필요 '+unresolved+
+     (candidates.length>analyzed?' · 나머지 분석 중':''));
+   }
+   report((visualCancel?'AI 분석 중단':'AI 페이지 자동 판별 완료')+
+    ' · '+analyzed+'/'+candidates.length+'쪽 · 확실 '+high+'쪽 / 확인 권장 '+medium+'쪽 / 판별 필요 '+unresolved+'쪽.'+
+    ' 학번·이름 및 학생별 페이지 구분은 저장 전 확인하세요.');
+  }catch(error){
+   report('AI 페이지 판별 중 오류: '+(error?.message||String(error))+
+    ' · 성공한 페이지는 유지했습니다. [AI로 미판별 페이지 다시 분석]으로 재시도할 수 있습니다.');
+   throw error;
+  }finally{
+   visualBusy=false;
+   if(!hadAnalysisLock)analysisBusy=false;
+   if(stopBtn){stopBtn.hidden=true;stopBtn.disabled=true;}
+   if(scanBtn)scanBtn.disabled=!session;
+   for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
+    const field=el(id);if(field)field.disabled=analysisBusy;
+   }
+  }
+ }
  function drawPageRows(){
   if(!session)return;
   el('fuReview').hidden=false;
   el('fuConfirm').checked=false;
   el('fuPageRows').innerHTML=session.pages.map((p,i)=>
-   '<tr><td><strong>'+(i+1)+'</strong><small>'+esc(p.fileName)+' · '+p.pageNo+'쪽</small></td>'+
+   '<tr data-page-index="'+i+'" class="'+(p.confidence==='높음'?'page-ai-high':p.confidence==='보통'?'page-ai-medium':p.role==='unknown'?'page-ai-unknown':'')+'"><td><strong>'+(i+1)+'</strong><small>'+esc(p.fileName)+' · '+p.pageNo+'쪽</small></td>'+
    '<td><img class="scan-thumb" data-preview="'+i+'" src="'+p.thumb+'" alt="PDF '+(i+1)+'쪽 미리보기" title="클릭하여 확대"></td>'+
    '<td><input type="checkbox" data-start="'+i+'"'+(p.start?' checked':'')+'></td>'+
    '<td><select data-role="'+i+'" class="control">'+roleOptions(p.role)+'</select></td>'+
-   '<td>'+esc(p.detected||'직접 확인 필요')+'</td></tr>').join('');
+   '<td><span class="page-ai-tag '+(p.confidence==='높음'?'is-high':p.confidence==='보통'?'is-medium':p.role==='unknown'?'is-unknown':'is-text')+'">'+esc(p.manualEdited?'교사 지정':p.confidence==='높음'?'AI 높음':p.confidence==='보통'?'AI 보통':p.visualChecked?'판별 불확실':p.role==='unknown'?'판별 필요':'텍스트 확인')+'</span><small class="page-ai-reason">'+esc(p.detected||'직접 확인 필요')+'</small></td></tr>').join('');
   el('fuPageRows').querySelectorAll('[data-start]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.start)];p.start=input.checked;
    if(p.start)p.role='front';else if(p.role==='front')p.role='unknown';
-   el('fuConfirm').checked=false;drawUpdatedSelectors();checkGroups();
+   p.manualEdited=true;p.detected='교사가 직접 페이지 시작을 수정함';p.confidence='교사';
+   el('fuConfirm').checked=false;drawPageRows();
   });
   el('fuPageRows').querySelectorAll('[data-role]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.role)];p.role=input.value;p.start=p.role==='front';
-   el('fuConfirm').checked=false;drawUpdatedSelectors();checkGroups();
+   p.manualEdited=true;p.detected='교사가 직접 STEP을 지정함';p.confidence='교사';
+   el('fuConfirm').checked=false;drawPageRows();
   });
   el('fuPageRows').querySelectorAll('[data-preview]').forEach(img=>img.onclick=()=>safe(async()=>{
    const p=session.pages[Number(img.dataset.preview)];
@@ -190,7 +256,7 @@ export function renderFlexibleUpload(ctx){
    modal.innerHTML='<button type="button" class="btn primary">닫기</button><img src="'+url+'" alt="원본 페이지 확대">';
    document.body.appendChild(modal);modal.onclick=()=>modal.remove();
   }));
-  checkGroups();
+  updateReviewFilter();checkGroups();
  }
  function drawUpdatedSelectors(){
   session.pages.forEach((p,i)=>{
@@ -200,6 +266,8 @@ export function renderFlexibleUpload(ctx){
   });
  }
  el('fuConfirm').onchange=checkGroups;
+ el('fuOnlyNeedsReview').onchange=updateReviewFilter;
+ el('fuStopAi').onclick=()=>{visualCancel=true;report('현재 AI 요청이 끝나면 나머지 페이지 판별을 중단합니다.');};
  el('fuInspect').onclick=()=>safe(async()=>{
   if(session)session=null;
   const files=[...selectedFiles];if(!files.length)throw Error('분석할 PDF 파일을 먼저 추가하세요.');
