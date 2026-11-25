@@ -43,4 +43,12 @@ assert.equal(testValueCheck('999','수위',3).valid,false);
 assert.equal(testValueCheck('TEST5','수위',3).valid,false);
 assert.equal(testValueCheck('TEST5','수위').valid,true);
 assert.equal(testValueCheck('2.8','진동',1).valid,false);
+// 회귀 검증: TEST2 유속 3.0은 학생이 '3'으로 적어도 정답이다.
+assert.equal(testValueCheck('3','유속',2).valid,true);
+assert.equal(testValueCheck('3.0','유속',2).valid,true);
+assert.equal(testValueCheck('3','수위',2).valid,false);
+assert.equal(testValueCheck('TEST3','유속',2).valid,false);
+assert.equal(testValueCheck('3번','유속',2).valid,false);
+assert.equal(testValueCheck('3','유속',3).valid,true);
+assert.equal(testValueCheck('3','유속',null).valid,true);
 console.log('검증 통과: 최대 5장 가변 PDF·이름 시작 분리·STEP 정렬·TEST1~6 이중 정답');
