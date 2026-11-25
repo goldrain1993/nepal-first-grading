@@ -2,7 +2,7 @@ import {doc,writeBatch,updateDoc,deleteDoc,serverTimestamp} from 'https://www.gs
 import {ref,uploadBytes,deleteObject} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js';
 import {httpsCallable} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js';
 import {activeNumbers,escapeHtml as esc} from './core.mjs';
-import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages} from './page-grouping.mjs';
+import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages} from './page-grouping.mjs?v=3';
 
 let session=null;
 const el=id=>document.getElementById(id);
