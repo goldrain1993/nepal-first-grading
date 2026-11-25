@@ -20,12 +20,13 @@ async function thumbnail(p,scale=0.36){
  return image;
 }
 export function renderFlexibleUpload(ctx){
- const {main,heading,state,ui,toast,ask,nav}=ctx;
+ const {main,heading,state,ui,toast,ask,nav,safe}=ctx;
  if(!state.classes.length){
    main(heading('UPLOAD ANSWERS','PDF 업로드','먼저 학급을 설정하세요.')+'<div class="panel"><button class="btn primary" id="goSettings">학급 설정</button></div>');
    el('goSettings').onclick=()=>nav('settings');return;
  }
  session=null;
+ let selectedFiles=[];
  const c=state.classes.find(x=>x.classNo===ui.classNo)||state.classes[0];
  ui.classNo=c.classNo;ui.startNo=Math.max(c.startNo,Math.min(c.endNo,ui.startNo));
  ui.endNo=Math.max(ui.startNo,Math.min(c.endNo,ui.endNo));
@@ -36,8 +37,11 @@ export function renderFlexibleUpload(ctx){
  '<div class="field"><label>시작 번호</label><input type="number" id="fuStart" min="'+c.startNo+'" max="'+c.endNo+'" value="'+ui.startNo+'"></div>'+
  '<div class="field"><label>마지막 번호</label><input type="number" id="fuEnd" min="'+c.startNo+'" max="'+c.endNo+'" value="'+ui.endNo+'"></div></div>'+
  '<p class="help-text" id="fuExpected"></p><div class="panel-head"><h2>02. PDF 파일 선택</h2></div>'+
- '<input class="control" type="file" id="fuFiles" accept=".pdf,application/pdf" multiple>'+
- '<p class="help-text">PDF 한 개에 여러 학생 답안이 들어 있어도 됩니다. 총 페이지 수가 5의 배수가 아니어도 됩니다. 스캔 PDF에서 이름·STEP이 자동 판독되지 않으면 수동 확인하세요.</p>'+
+ '<div id="fuDropzone" class="pdf-dropzone" role="button" tabindex="0" aria-label="PDF 파일 여러 개 끌어놓기 또는 클릭해서 추가">'+
+ '<strong>⇩ PDF 파일을 여기로 끌어다 놓으세요</strong><span>3반 PDF 3개도 한꺼번에 추가 가능 · 클릭해서 추가 선택</span></div>'+
+ '<div class="pdf-file-picker"><input class="control" type="file" id="fuFiles" accept=".pdf,application/pdf" multiple aria-label="PDF 여러 개 선택"></div>'+
+ '<div id="fuFileList" class="pdf-file-list" aria-live="polite"></div>'+
+ '<p class="help-text">선택한 모든 파일을 표시된 순서대로 연결하여 분석합니다. ↑↓ 버튼으로 파일 순서를 변경할 수 있습니다. 학생당 1~5장, 스캔본은 AI 또는 교사 확인이 필요합니다.</p>'+
  '<div class="sub-actions"><button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
  '<button class="btn secondary" id="fuAiScan" disabled>AI로 이름·STEP 자동 판별 (Cloud Functions 배포 필요·비용)</button></div>'+
  '<p id="fuStatus" class="help-text" role="status"></p></div>'+
