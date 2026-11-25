@@ -2,7 +2,7 @@ import {doc,writeBatch,updateDoc,deleteDoc,serverTimestamp} from 'https://www.gs
 import {ref,uploadBytes,deleteObject} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js';
 import {httpsCallable} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js';
 import {activeNumbers,escapeHtml as esc} from './core.mjs';
-import {PAGE_ROLES,ROLE_NAMES,inferPageRole,groupPages} from './page-grouping.mjs';
+import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages} from './page-grouping.mjs';
 
 let session=null;
 const el=id=>document.getElementById(id);
@@ -41,12 +41,15 @@ export function renderFlexibleUpload(ctx){
  '<strong>⇩ PDF 파일을 여기로 끌어다 놓으세요</strong><span>3반 PDF 3개도 한꺼번에 추가 가능 · 클릭해서 추가 선택</span></div>'+
  '<div class="pdf-file-picker"><input class="control" type="file" id="fuFiles" accept=".pdf,application/pdf" multiple aria-label="PDF 여러 개 선택"></div>'+
  '<div id="fuFileList" class="pdf-file-list" aria-live="polite"></div>'+
- '<p class="help-text">선택한 모든 파일을 표시된 순서대로 연결하여 분석합니다. ↑↓ 버튼으로 파일 순서를 변경할 수 있습니다. 학생당 1~5장, 스캔본은 AI 또는 교사 확인이 필요합니다.</p>'+
+ '<p class="help-text">선택한 모든 파일을 표시된 순서대로 연결하여 분석합니다. ↑↓ 버튼으로 순서를 변경할 수 있습니다. 학생당 1~5장입니다.</p>'+ 
+ '<label class="pdf-auto-vision"><input type="checkbox" id="fuAutoVision" checked> <span><strong>스캔본의 인쇄 제목·문항·페이지 모양까지 AI가 자동 판별</strong><small>PDF 분석 후 AI 실행 전 개인정보 외부 전송·비용에 관한 확인창이 나타납니다. 동의하지 않으면 AI는 호출되지 않습니다.</small></span></label>'+
  '<div class="sub-actions"><button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
- '<button class="btn secondary" id="fuAiScan" disabled>AI로 이름·STEP 자동 판별 (Cloud Functions 배포 필요·비용)</button></div>'+
+ '<button class="btn secondary" id="fuAiScan" disabled>↻ AI로 미판별 페이지 다시 분석</button>'+ 
+ '<button class="btn secondary" id="fuStopAi" disabled hidden>AI 페이지 판별 중단</button></div>'+
  '<p id="fuStatus" class="help-text" role="status"></p></div>'+
  '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. 페이지별 분리·정렬 확인</h2></div>'+
- '<p class="notice warn">이름이 적힌 첫 장마다 "새 학생 시작"을 선택하세요. 장마다 STEP을 확인하면 STEP 1 → STEP 1 계속 → STEP 2 → STEP 3 → STEP 4로 자동 정렬합니다. AI 판독이 틀렸을 때는 직접 수정할 수 있습니다.</p>'+
+ '<p class="thin-note">인쇄된 STEP 제목·문항 및 페이지 구조로 AI가 구분합니다. <strong>높음: 자동 분류 / 보통: 확인 권장 / 낮음: 판별 필요</strong>. 학생별 순서·학번·이름은 저장 전 최종 확인하세요.</p>'+ 
+ '<label class="mini-check pdf-review-toggle"><input type="checkbox" id="fuOnlyNeedsReview"> 판별 필요·보통 신뢰도 페이지만 보기</label>'+
  '<div class="table-wrap"><table class="small-table flexible-page-table"><thead><tr><th>원본 페이지</th><th>미리보기</th><th>새 학생 시작</th><th>STEP 구분</th><th>판독 메모</th></tr></thead><tbody id="fuPageRows"></tbody></table></div>'+
  '<div class="notice" id="fuGroupSummary"></div>'+
  '<label class="identity-check"><input id="fuConfirm" type="checkbox"> 원본 첫 장의 학번·이름과 학생별 페이지 범위·정렬 결과를 확인했습니다. 업로드 후 채점 화면에서도 첫 장을 다시 확인하겠습니다.</label>'+
