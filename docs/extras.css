@@ -62,3 +62,23 @@
 .pdf-file-buttons .btn{padding:5px 9px;min-height:30px;font-size:12px}
 .pdf-clear-button{margin-top:10px;font-size:12px}
 @media(max-width:650px){.pdf-dropzone{min-height:110px}.pdf-selected-files>li .pdf-selected-name{max-width:100%;display:flex}.pdf-file-buttons{float:none;margin:7px 0 0}}
+
+
+/* 스캔된 수행평가지 STEP: 문항/레이아웃 AI 분류 */
+.pdf-auto-vision{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;margin:12px 0 14px;border:1px solid #c2d8f4;border-radius:12px;background:#eef6ff;color:#164575;cursor:pointer}
+.pdf-auto-vision>input{margin-top:3px;accent-color:#1866c5;width:19px;height:19px;flex:none}
+.pdf-auto-vision>span{display:grid;gap:4px}
+.pdf-auto-vision strong{font-size:13px;line-height:1.5}
+.pdf-auto-vision small{font-size:11px;color:#52718f;line-height:1.7}
+.pdf-review-toggle{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;margin:7px 0 14px;background:#f4f8fd;border:1px solid #dce7f3;border-radius:9px;font-size:12px;color:#335574;cursor:pointer}
+.pdf-review-toggle input{accent-color:#1866c5;width:16px;height:16px}
+.flexible-page-table tr[hidden]{display:none!important}
+.flexible-page-table .page-ai-high{background:#f7fcf8}
+.flexible-page-table .page-ai-medium{background:#fffaf0}
+.flexible-page-table .page-ai-unknown{background:#fff6f4}
+.page-ai-tag{display:inline-flex;align-items:center;white-space:nowrap;border-radius:99px;padding:2px 9px;font-size:10px;font-weight:850;background:#edf2f7;color:#526780}
+.page-ai-tag.is-high{background:#e2f7ea;color:#14643d}
+.page-ai-tag.is-medium{background:#fff0cf;color:#8d5c08}
+.page-ai-tag.is-unknown{background:#feece8;color:#a83725}
+.page-ai-tag.is-text{background:#e6f0fc;color:#245c9c}
+.page-ai-reason{display:block;font-size:11px;max-width:370px;line-height:1.6;color:#66809b;margin-top:5px;overflow-wrap:anywhere}
