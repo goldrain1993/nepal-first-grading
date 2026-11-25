@@ -290,44 +290,39 @@ export function renderFlexibleUpload(ctx){
       report('장별 판독 중: '+file.name+' '+n+'/'+view.numPages+'쪽');
       const page=await view.getPage(n);
       let t='';try{t=(await page.getTextContent()).items.map(x=>x.str||'').join(' ')}catch{}
-      let role=inferPageRole(t);let start=role==='front'||n===1;
-      if(n===1&&role==='unknown')role='front';
-      const p={file,edit,view,fileName:file.name,pageNo:n,role,start,detected:t.trim()?'PDF 텍스트 기준 분류':'스캔본 · AI 또는 교사 확인 필요'};
+      const role=inferPageRole(t);
+      const needsVisual=role==='unknown'||t.replace(/\\s/g,'').length<35;
+      const p={file,edit,view,fileName:file.name,pageNo:n,role,start:role==='front',
+       needsVisual,visualChecked:false,manualEdited:false,confidence:role!=='unknown'?'높음':'미확인',
+       detected:role==='unknown'?'이미지 스캔 또는 인쇄문항 확인 필요 · AI 자동 분류 대상':'PDF 텍스트에서 STEP 제목·문항 확인'};
       p.thumb=await thumbnail(p,0.34);
       pages.push(p);
     }
    }
    session={pages,groups:null};
-   drawPageRows();el('fuAiScan').disabled=false;report('총 '+pages.length+'쪽을 읽었습니다. 이름 있는 첫 장과 STEP을 확인하세요. 스캔본은 AI 판별 기능도 사용할 수 있습니다.');
+   drawPageRows();el('fuAiScan').disabled=false;
+   const n=pages.filter(p=>p.needsVisual).length;
+   report('PDF '+files.length+'개 · 총 '+pages.length+'쪽의 미리보기를 생성했습니다. AI 이미지 분류 대상 '+n+'쪽.');
+   if(n&&el('fuAutoVision').checked){
+    const permitted=await ask('스캔 PDF 이미지 AI 분석 동의',
+      '스캔된 답안 '+n+'쪽의 페이지 이미지(학생 이름·학번과 필기 포함)를 외부 OpenAI API에 전송해 STEP 제목·문항·레이아웃을 분석합니다. API 사용료가 발생하며 학교 개인정보 처리·외부 전송 지침을 확인해야 합니다. 실행하시겠습니까?',
+      '동의하고 AI 자동 판별');
+    if(permitted)await runVisualClassification();
+    else report('AI 자동 분류를 건너뛰었습니다. 현재 분류와 페이지 미리보기는 유지했습니다. 필요하면 AI 판별 버튼을 별도로 누를 수 있습니다.');
+   }
+   else if(n)report('PDF '+files.length+'개, '+pages.length+'쪽 · 이미지 자동 분류 '+n+'쪽이 남았습니다. AI 체크 후 다시 분석하거나 AI 버튼을 사용하세요.');
+   else report('PDF '+files.length+'개, '+pages.length+'쪽 · 인쇄된 STEP 문항을 텍스트에서 모두 구분했습니다. 아래 학생별 분리 결과를 확인하세요.');
   }catch(error){report('PDF 장별 분석 실패: '+(error?.message||String(error)));throw error;}
   finally{analysisBusy=false;el('fuInspect').disabled=false;picker.disabled=false;}
  });
  el('fuAiScan').onclick=()=>safe(async()=>{
-  if(!session)throw Error('PDF 분석부터 실행하세요.');
-  if(!await ask('AI 페이지 판별','모든 PDF 페이지 이미지가 외부 OpenAI API로 전송됩니다. 학생 개인정보 전송 및 비용 발생 가능성을 확인하셨습니까?','AI 판별 실행'))return;
-  const btn=el('fuAiScan');btn.disabled=true;
-  try{
-   const callable=httpsCallable(ctx.functions,'inspectPages',{timeout:120000});
-   for(let offset=0;offset<session.pages.length;offset+=6){
-    const chunk=session.pages.slice(offset,offset+6);
-    report('AI가 '+(offset+1)+'~'+(offset+chunk.length)+'쪽을 판별하는 중…');
-    const images=[];
-    for(const p of chunk){images.push(await thumbnail(p,1.6));}
-    const response=await callable({images});
-    const detected=response.data?.pages||[];
-    if(detected.length!==chunk.length)throw Error('AI 응답의 페이지 수가 일치하지 않습니다.');
-    for(let j=0;j<chunk.length;j++){
-      const item=detected[j],p=chunk[j],recognized=item.role;
-      if(PAGE_ROLES.includes(recognized)){
-       p.role=recognized;p.start=recognized==='front';
-      }else{p.role='unknown';p.start=false;}
-      if(offset+j===0){p.start=true;p.role='front';}
-      p.detected=(item.confidence||'판별 불확실')+' · '+(item.reason||'')+(item.studentNo?' · 판독번호 '+item.studentNo:'')+(item.studentName?' · 이름 '+item.studentName:'');
-      p.recognizedNo=item.studentNo||'';p.recognizedName=item.studentName||'';p.confidence=item.confidence||'';
-    }
-   }
-   drawPageRows();report('AI 페이지 판별이 끝났습니다. 첫 장과 STEP을 교사가 반드시 확인한 후 저장하세요.');
-  }finally{if(el('fuAiScan'))el('fuAiScan').disabled=false;}
+  if(!session)throw Error('PDF 장별 분석부터 실행하세요.');
+  const n=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked))).length;
+  if(!n){report('AI가 판독할 미확인 페이지가 없습니다. 보통/낮음 결과를 재검토하려면 해당 STEP을 직접 확인해 주세요.');return;}
+  if(!await ask('AI 스캔 페이지 판별',
+    '확인되지 않은 '+n+'쪽의 이미지(학번·이름·필기 포함)가 외부 OpenAI API로 전송되며 비용이 발생할 수 있습니다. 학교 개인정보·보안 지침에 따라 이용이 허용되는지 확인했습니까?',
+    '동의하고 AI 판별'))return;
+  await runVisualClassification();
  });
  el('fuUpload').onclick=()=>safe(async()=>{
   if(!session?.groups||!el('fuConfirm').checked)throw Error('페이지 구분과 확인 체크를 먼저 완료하세요.');
