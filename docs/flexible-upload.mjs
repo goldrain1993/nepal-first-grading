@@ -237,7 +237,7 @@ export function renderFlexibleUpload(ctx){
    '<td><img class="scan-thumb" data-preview="'+i+'" src="'+p.thumb+'" alt="PDF '+(i+1)+'쪽 미리보기" title="클릭하여 확대"></td>'+
    '<td><input type="checkbox" data-start="'+i+'"'+(p.start?' checked':'')+'></td>'+
    '<td><select data-role="'+i+'" class="control">'+roleOptions(p.role)+'</select></td>'+
-   '<td><span class="page-ai-tag '+(p.confidence==='높음'?'is-high':p.confidence==='보통'?'is-medium':p.role==='unknown'?'is-unknown':'is-text')+'">'+esc(p.manualEdited?'교사 지정':p.confidence==='높음'?'AI 높음':p.confidence==='보통'?'AI 보통':p.visualChecked?'판별 불확실':p.role==='unknown'?'판별 필요':'텍스트 확인')+'</span><small class="page-ai-reason">'+esc(p.detected||'직접 확인 필요')+'</small></td></tr>').join('');
+   '<td><span class="page-ai-tag '+(p.manualEdited?'is-text':p.visualChecked?(p.confidence==='높음'?'is-high':p.confidence==='보통'?'is-medium':'is-unknown'):p.role==='unknown'?'is-unknown':'is-text')+'">'+esc(p.manualEdited?'교사 지정':p.visualChecked?(p.confidence==='높음'?'AI 높음':p.confidence==='보통'?'AI 보통':'AI 불확실'):p.role==='unknown'?'판별 필요':'텍스트 판별')+'</span><small class="page-ai-reason">'+esc(p.detected||'직접 확인 필요')+'</small></td></tr>').join('');
   el('fuPageRows').querySelectorAll('[data-start]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.start)];p.start=input.checked;
    if(p.start)p.role='front';else if(p.role==='front')p.role='unknown';
@@ -291,7 +291,7 @@ export function renderFlexibleUpload(ctx){
       const page=await view.getPage(n);
       let t='';try{t=(await page.getTextContent()).items.map(x=>x.str||'').join(' ')}catch{}
       const role=inferPageRole(t);
-      const needsVisual=role==='unknown'||t.replace(/\\s/g,'').length<35;
+      const needsVisual=role==='unknown'||t.replace(/\s/g,'').length<35;
       const p={file,edit,view,fileName:file.name,pageNo:n,role,start:role==='front',
        needsVisual,visualChecked:false,manualEdited:false,confidence:role!=='unknown'?'높음':'미확인',
        detected:role==='unknown'?'이미지 스캔 또는 인쇄문항 확인 필요 · AI 자동 분류 대상':'PDF 텍스트에서 STEP 제목·문항 확인'};
@@ -313,7 +313,10 @@ export function renderFlexibleUpload(ctx){
    else if(n)report('PDF '+files.length+'개, '+pages.length+'쪽 · 이미지 자동 분류 '+n+'쪽이 남았습니다. AI 체크 후 다시 분석하거나 AI 버튼을 사용하세요.');
    else report('PDF '+files.length+'개, '+pages.length+'쪽 · 인쇄된 STEP 문항을 텍스트에서 모두 구분했습니다. 아래 학생별 분리 결과를 확인하세요.');
   }catch(error){report('PDF 장별 분석 실패: '+(error?.message||String(error)));throw error;}
-  finally{analysisBusy=false;el('fuInspect').disabled=false;picker.disabled=false;}
+  finally{analysisBusy=false;el('fuInspect').disabled=false;picker.disabled=false;
+   for(const id of ['fuClass','fuStart','fuEnd']){const field=el(id);if(field)field.disabled=false;}
+   if(el('fuAiScan'))el('fuAiScan').disabled=!session;
+  }
  });
  el('fuAiScan').onclick=()=>safe(async()=>{
   if(!session)throw Error('PDF 장별 분석부터 실행하세요.');
