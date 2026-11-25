@@ -40,3 +40,25 @@
 #fuGroupSummary td{font-size:12px;word-break:break-word}
 .page-zoom-overlay{position:fixed;inset:0;background:rgba(9,23,44,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;gap:10px;padding:25px;overflow-y:auto;cursor:zoom-out}
 .page-zoom-overlay img{max-width:min(95vw,1400px);height:auto;background:white;object-fit:contain}
+
+
+/* PDF files: multi-selection, drop to append, inspect in displayed order */
+.pdf-dropzone{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:7px;min-height:124px;padding:22px 18px;margin:12px 0 10px;border:2px dashed #8eafd1;border-radius:14px;text-align:center;color:#16477a;background:#f3f8fe;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}
+.pdf-dropzone strong{font-size:16px;font-weight:850}
+.pdf-dropzone span{font-size:12px;color:#5d7895}
+.pdf-dropzone:hover,.pdf-dropzone:focus-visible,.pdf-dropzone.drag-active{border-color:#1671da;background:#e5f1ff;outline-offset:3px}
+.pdf-file-picker{margin:8px 0}
+.pdf-file-picker input[type="file"]{max-width:100%;font-size:13px}
+.pdf-file-list{margin:11px 0 15px}
+.pdf-file-summary{padding:10px 12px;margin-bottom:7px;background:#eaf4ff;border-radius:9px;color:#174b85;font-weight:650;font-size:13px}
+.pdf-selected-files{list-style:decimal;padding:0 0 0 25px;margin:0;display:grid;gap:6px}
+.pdf-selected-files>li{padding:9px 10px 9px 5px;border-bottom:1px solid #e2eaf3}
+.pdf-selected-files>li::marker{font-weight:800;color:#366590}
+.pdf-selected-files li{display:list-item}
+.pdf-selected-files>li .pdf-selected-name{display:inline-flex;flex-direction:column;gap:2px;max-width:calc(100% - 190px);vertical-align:middle;overflow-wrap:anywhere}
+.pdf-selected-name strong{font-size:12px;color:#22415f}
+.pdf-selected-name span{font-size:11px;color:#6b7f94}
+.pdf-file-buttons{display:inline-flex;float:right;gap:5px}
+.pdf-file-buttons .btn{padding:5px 9px;min-height:30px;font-size:12px}
+.pdf-clear-button{margin-top:10px;font-size:12px}
+@media(max-width:650px){.pdf-dropzone{min-height:110px}.pdf-selected-files>li .pdf-selected-name{max-width:100%;display:flex}.pdf-file-buttons{float:none;margin:7px 0 0}}
