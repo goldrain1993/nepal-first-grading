@@ -203,9 +203,9 @@ export function renderFlexibleUpload(ctx){
   const nums=targetNumbers();if(!nums.length)throw Error('학급과 번호 범위를 확인하세요.');
   analysisBusy=true;el('fuInspect').disabled=true;picker.disabled=true;el('fuAiScan').disabled=true;el('fuReview').hidden=true;
   report('PDF '+files.length+'개를 분석할 준비 중입니다. 파일의 용량과 페이지 수에 따라 브라우저에서 처리 시간이 걸릴 수 있습니다.');
-  if(!window.PDFLib?.PDFDocument)throw Error('PDF 분리 라이브러리를 불러오지 못했습니다. Ctrl+F5로 새로고침하세요.');
-  if(!ctx.pdfjsLib?.getDocument)throw Error('PDF 미리보기 라이브러리가 준비되지 않았습니다. Ctrl+F5로 새로고침하세요.');
   try{
+   if(!window.PDFLib?.PDFDocument)throw Error('PDF 분리 라이브러리를 불러오지 못했습니다. Ctrl+F5로 새로고침하세요.');
+   if(!ctx.pdfjsLib?.getDocument)throw Error('PDF 미리보기 라이브러리가 준비되지 않았습니다. Ctrl+F5로 새로고침하세요.');
    const pages=[];
    for(let f=0;f<files.length;f++){
     const file=files[f];
