@@ -24,13 +24,21 @@ function normalizeSensor(raw){
 function testValueCheck(input,sensor,assignedTestNo=null){
  const raw=String(input??'').trim();
  if(!raw)return {valid:false,reason:'TEST 값 미기재',basis:'none'};
- const label=raw.match(/^\s*(?:TEST|테스트|T)\s*[-#:]?\s*([1-6])\s*(?:번|호)?\s*$/i)
-   ||raw.match(/^\s*([1-6])\s*(?:번|호)?\s*$/);
- if(label){
-   const testNo=Number(label[1]);
+ // 명시적인 TEST 표기와 맨 숫자는 구별한다. 맨 숫자 '3'은
+ // TEST 3번일 수도, TEST 2의 유속 3.0m/s일 수도 있다.
+ const explicitLabel=raw.match(/^\s*(?:TEST|테스트|T)\s*[-#:]?\s*([1-6])\s*(?:번|호)?\s*$/i)
+   ||raw.match(/^\s*([1-6])\s*(?:번|호)\s*$/);
+ const bareLabel=raw.match(/^\s*([1-6])\s*$/);
+ if(explicitLabel){
+   const testNo=Number(explicitLabel[1]);
    if(assignedTestNo!==null&&Number(assignedTestNo)!==testNo)return {valid:false,reason:'배정된 TEST 번호와 다릅니다.',basis:'test-id',testNo};
    return {valid:true,reason:'TEST '+testNo+' 번호로 작성한 정답',basis:'test-id',testNo};
  }
+ if(bareLabel&&(assignedTestNo===null||Number(assignedTestNo)===Number(bareLabel[1]))){
+   const testNo=Number(bareLabel[1]);
+   return {valid:true,reason:'TEST '+testNo+' 번호로 작성한 정답',basis:'test-id',testNo};
+ }
+ // 맨 숫자가 배정 TEST 번호와 다르더라도, 해당 센서 실측값일 수 있으므로 아래에서 확인한다.
  const cleaned=raw.replace(/\s/g,'').replace(/(?:°C|℃|mm\/h|mm|m\/s|m|0~10)$/i,'').replace(/,/g,'');
  if(!/^[+-]?\d+(?:\.\d+)?$/.test(cleaned))return {valid:false,reason:'유효한 TEST 번호 또는 센서 측정값이 아닙니다.',basis:'unknown'};
  const value=Number(cleaned),sensorId=normalizeSensor(sensor);
@@ -43,7 +51,7 @@ function testValueCheck(input,sensor,assignedTestNo=null){
      if(Math.abs(row[k]-value)<0.000001)matched.push({testNo,sensor:k});
    }
  }
- if(!matched.length)return {valid:false,reason:'지정 TEST의 해당 센서 수치와 일치하지 않습니다.',basis:'sensor-value',sensor:sensorId,value};
+ if(!matched.length)return {valid:false,reason:bareLabel?'배정된 TEST 번호와 다르고 해당 센서의 실제 수치도 아닙니다.':'지정 TEST의 해당 센서 수치와 일치하지 않습니다.',basis:'sensor-value',sensor:sensorId,value};
  return {valid:true,reason:'TEST 센서 측정값과 일치',basis:'sensor-value',sensor:sensorId,value,matched};
 }
 module.exports={TEST_SETS,SENSORS,normalizeSensor,testValueCheck};
