@@ -5,7 +5,7 @@ import {getStorage,ref,uploadBytes,getBlob,deleteObject} from 'https://www.gstat
 import {getFunctions,httpsCallable} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js';
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 import {firebaseConfig} from './firebase-config.js';
-import {readSchoolExcel,downloadSchoolExcelTemplate} from './roster-excel.mjs';
+import {readSchoolExcel,downloadSchoolExcelTemplate} from './roster-excel.mjs?v=2';
 import {renderFlexibleUpload} from './flexible-upload.mjs?v=12';
 import {checkClassBulkFinalize} from './bulk-finalize.mjs?v=1';
 import {AREA_KEYS,LEVELS,DEFAULT_RUBRIC,escapeHtml as esc,score,verifyRubric,assertClass,activeNumbers,parseMissingNumbers,genderRangesForClass,rangesForPages,parseCsv,toCsv,mergeRosterImport} from './core.mjs?v=2';
