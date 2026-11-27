@@ -63,19 +63,27 @@ export function renderFlexibleUpload(ctx){
  '<label class="identity-check"><input id="fuConfirm" type="checkbox"> 원본 첫 장의 학번·이름과 학생별 페이지 범위·정렬 결과를 확인했습니다. 업로드 후 채점 화면에서도 첫 장을 다시 확인하겠습니다.</label>'+
  '<div class="sub-actions"><label class="mini-check"><input type="checkbox" id="fuAutoAi"> 저장 후 AI 보조 채점도 실행 (별도 API 비용)</label></div>'+
  '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div>');
- const updateExpected=()=>{
+ const updateExpected=(resetForClassChange=false)=>{
   const cur=state.classes.find(x=>x.classNo===Number(el('fuClass').value));
   const a=Number(el('fuStart').value),b=Number(el('fuEnd').value);
   let nums=[];
   try{nums=activeNumbers(cur,a,b);}catch{}
   el('fuExpected').textContent=cur.classNo+'반 · 결번 제외 '+nums.length+'명 ('+nums.map(n=>n+'번').join(', ')+') · 페이지 수는 1인 최대 5장';
-  if(el('fuReview'))el('fuReview').hidden=true;session=null;
+  if(resetForClassChange){
+   resetReview();
+  }else if(session){
+   // Keep the already classified PDF pages when correcting just the selected
+   // student-number range. Revalidate groups before allowing any upload.
+   el('fuConfirm').checked=false;
+   checkGroups();
+  }
  };
  el('fuClass').onchange=()=>{
   const k=state.classes.find(x=>x.classNo===Number(el('fuClass').value));
-  el('fuStart').value=k.startNo;el('fuEnd').value=k.endNo;updateExpected();
+  el('fuStart').value=k.startNo;el('fuEnd').value=k.endNo;updateExpected(true);
  };
- el('fuStart').oninput=updateExpected;el('fuEnd').oninput=updateExpected;
+ el('fuStart').oninput=()=>updateExpected();
+ el('fuEnd').oninput=()=>updateExpected();
  const report=s=>{if(el('fuStatus'))el('fuStatus').textContent=s};
  let analysisBusy=false,visualBusy=false,visualCancel=false,aiServerReady=false;
  const resetReview=()=>{
