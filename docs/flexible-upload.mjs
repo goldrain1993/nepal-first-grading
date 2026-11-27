@@ -7,7 +7,7 @@ import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages} fr
 let session=null;
 const el=id=>document.getElementById(id);
 const label=(v)=>String(v??'—');
-const roleOptions=(selected)=>[['unknown','판별 필요'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
+const roleOptions=(selected)=>[['unknown','미판별 / 재검토'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
 async function thumbnail(p,scale=0.36){
  const page=await p.view.getPage(p.pageNo);
  const maxWidth=scale>1.3?1500:scale>0.7?1050:550;
@@ -47,7 +47,13 @@ export function renderFlexibleUpload(ctx){
  '<button class="btn secondary" id="fuAiScan" disabled>↻ AI로 미판별 페이지 다시 분석</button>'+ 
  '<button class="btn secondary" id="fuStopAi" disabled hidden>AI 페이지 판별 중단</button></div>'+
  '<p id="fuStatus" class="help-text" role="status"></p></div>'+
- '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. 페이지별 분리·정렬 확인</h2></div>'+
+ '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. AI 페이지 판별·학생별 분리 확인</h2></div>'+ 
+ '<div id="fuAiProgress" class="pdf-ai-progress" role="status" aria-live="polite">'+
+ '<div class="pdf-ai-progress-head"><strong id="fuAiProgressTitle">AI 분석 전</strong><span id="fuAiProgressCount">0/0쪽</span></div>'+
+ '<progress id="fuAiProgressBar" max="100" value="0"></progress>'+
+ '<div id="fuAiProgressDetail" class="pdf-ai-progress-detail">스캔 PDF는 AI가 인쇄 문항과 레이아웃으로 STEP을 판별합니다.</div>'+
+ '<button type="button" class="btn secondary" id="fuRetryVisual" disabled>남은 미판별 페이지 AI 분석 계속</button>'+
+ '</div>'+
  '<p class="thin-note">인쇄된 STEP 제목·문항 및 페이지 구조로 AI가 구분합니다. <strong>높음: 자동 분류 / 보통: 확인 권장 / 낮음: 판별 필요</strong>. 학생별 순서·학번·이름은 저장 전 최종 확인하세요.</p>'+ 
  '<label class="mini-check pdf-review-toggle"><input type="checkbox" id="fuOnlyNeedsReview"> 판별 필요·보통 신뢰도 페이지만 보기</label>'+
  '<div class="table-wrap"><table class="small-table flexible-page-table"><thead><tr><th>원본 페이지</th><th>미리보기</th><th>새 학생 시작</th><th>STEP 구분</th><th>판독 메모</th></tr></thead><tbody id="fuPageRows"></tbody></table></div>'+
@@ -165,6 +171,36 @@ export function renderFlexibleUpload(ctx){
   }
  }
 
+ function updateAiProgress(phase='idle',message=''){
+  if(!session)return;
+  const pages=session.pages;
+  const total=pages.filter(p=>p.needsVisual).length;
+  const done=pages.filter(p=>p.needsVisual&&p.visualChecked).length;
+  const pending=pages.filter(p=>p.needsVisual&&!p.visualChecked&&!p.manualEdited).length;
+  const uncertain=pages.filter(p=>p.visualChecked&&(p.role==='unknown'||p.confidence==='낮음')).length;
+  const medium=pages.filter(p=>p.visualChecked&&p.confidence==='보통').length;
+  const high=pages.filter(p=>p.visualChecked&&p.confidence==='높음').length;
+  const label=el('fuAiProgressTitle'),counter=el('fuAiProgressCount'),bar=el('fuAiProgressBar'),detail=el('fuAiProgressDetail'),retry=el('fuRetryVisual');
+  if(!label)return;
+  const finished=total-pending;
+  const phaseTitle={running:'AI가 인쇄 문항·표·레이아웃을 분석하고 있습니다',done:'AI 페이지 분석 완료',error:'AI 분석 오류 · 중단된 위치부터 재시도 가능',cancel:'AI 페이지 분석 중단',idle:'AI 스캔 페이지 판별 대기',skipped:'AI 분석 동의하지 않음 · 실행되지 않음'};
+  label.textContent=phaseTitle[phase]||phaseTitle.idle;
+  counter.textContent=finished+'/'+total+'쪽 처리';
+  bar.max=Math.max(1,total);
+  bar.value=finished;
+  detail.textContent=(message?message+' · ':'')+'AI 확실 '+high+'쪽 / AI 확인 권장 '+medium+'쪽 / AI 판별 불확실 '+uncertain+'쪽 / 아직 AI 미분석 '+pending+'쪽';
+  if(retry)retry.disabled=analysisBusy||visualBusy||!pages.some(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
+ }
+ function friendlyAiError(error){
+  const raw=String(error?.message||error||'');
+  const code=String(error?.code||'');
+  if(/401|API 키|failed-precondition/.test(raw))return 'API 키가 유효하지 않거나 서버 설정이 필요합니다. Cloud Shell의 Firebase 함수 상태를 확인하세요.';
+  if(/429|resource-exhausted|quota/i.test(raw+' '+code))return 'OpenAI 호출 한도나 크레딧 부족으로 중단되었습니다. 결제/사용 한도를 확인한 후 남은 페이지를 다시 분석하세요.';
+  if(/deadline|timeout|시간 초과/i.test(raw+' '+code))return 'AI 응답 시간이 초과됐습니다. 완료된 페이지는 유지됩니다. 남은 페이지를 다시 분석하세요.';
+  if(/permission-denied|unauthenticated/i.test(raw+' '+code))return 'Firebase 교사 로그인 또는 AI 함수 권한을 확인하세요.';
+  if(/invalid-argument/i.test(raw+' '+code))return '이미지 크기 또는 요청 형식 오류입니다. 오류 메시지를 확인하세요.';
+  return raw||'원인을 확인할 수 없습니다. 브라우저 오류와 Firebase Functions 로그를 확인하세요.';
+ }
  function updateReviewFilter(){
   const only=el('fuOnlyNeedsReview')?.checked;
   if(!session||!el('fuPageRows'))return;
