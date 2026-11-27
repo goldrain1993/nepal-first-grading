@@ -21,7 +21,7 @@ function openAiFailure(e,task){
  return new HttpsError('unavailable',task+' 실패: AI 서버 통신 오류가 발생했습니다. Firebase 함수 로그를 확인하세요.');
 }
 
-exports.gradeAnswer=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSeconds:120,maxInstances:2,secrets:[OPENAI_API_KEY]},async request=>{
+exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSeconds:120,maxInstances:2,secrets:[OPENAI_API_KEY]},async request=>{
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','교사 로그인이 필요합니다.');
   const firebaseDb=admin.firestore();
   const teacher=await firebaseDb.doc(`teachers/${request.auth.uid}`).get();
@@ -64,10 +64,10 @@ exports.gradeAnswer=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSeco
      testValueChecks:testChecks,aiError:'',updatedAt:admin.firestore.FieldValue.serverTimestamp()};
    if(reviewReasons.length){
      await sref.update({...auditFields,aiCandidateGrade:grades,aiStatus:'교사 확인 필요'});
-     return {ok:true,reviewRequired:true,reviewReasons,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches}};
+     return {ok:true,gradingVersion:2,reviewRequired:true,reviewReasons,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches}};
    }
    await sref.update({...auditFields,aiGrade:grades,aiCandidateGrade:null,aiStatus:'AI 완료'});
-   return {ok:true,reviewRequired:false,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches},grades};
+   return {ok:true,gradingVersion:2,reviewRequired:false,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches},grades};
 });
 
 
