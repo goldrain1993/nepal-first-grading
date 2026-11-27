@@ -444,7 +444,7 @@ async function analyzeSubmission(sid,opts={}){
  await updateDoc(doc(db,'submissions',sid),{aiStatus:'AI 분석 중',aiError:'',updatedAt:serverTimestamp()});
  try{
   const images=await renderAiImages(sub); // Firebase Storage에 이미 등록된 PDF를 읽음
-  const callable=httpsCallable(functions,'gradeAnswer',{timeout:120000});
+  const callable=httpsCallable(functions,'gradeAnswerV2',{timeout:120000});
   const response=await callable({submissionId:sid,images});
   await loadAll();
    return {reviewRequired:!!response.data?.reviewRequired};
