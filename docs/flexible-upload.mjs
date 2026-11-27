@@ -2,9 +2,12 @@ import {doc,writeBatch,updateDoc,deleteDoc,serverTimestamp} from 'https://www.gs
 import {ref,uploadBytes,deleteObject} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js';
 import {httpsCallable} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js';
 import {activeNumbers,escapeHtml as esc} from './core.mjs';
-import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages} from './page-grouping.mjs?v=3';
+import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages,recognizedStudentNumber} from './page-grouping.mjs?v=4';
+import {readUploadDraft,storeUploadFiles,storeUploadProgress,clearUploadDraft} from './upload-draft.mjs';
 
 let session=null;
+let selectedFiles=[],selectedClassNo='',ownerId='',aiServerReady=false;
+let draftConfirmed=false,draftLoaded=false,draftQueue=Promise.resolve();
 const el=id=>document.getElementById(id);
 const label=(v)=>String(v??'—');
 const roleOptions=(selected)=>[['unknown','미판별 / 재검토'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
@@ -21,33 +24,36 @@ async function thumbnail(p,scale=0.36){
 }
 export function renderFlexibleUpload(ctx){
  const {main,heading,state,ui,toast,ask,nav,safe}=ctx;
+ const userId=ctx.userId||'';
+ if(ownerId!==userId){
+  session=null;selectedFiles=[];selectedClassNo='';aiServerReady=false;
+  draftConfirmed=false;draftLoaded=false;draftQueue=Promise.resolve();ownerId=userId;
+ }
  if(!state.classes.length){
    main(heading('UPLOAD ANSWERS','PDF 업로드','먼저 학급을 설정하세요.')+'<div class="panel"><button class="btn primary" id="goSettings">학급 설정</button></div>');
    el('goSettings').onclick=()=>nav('settings');return;
  }
- session=null;
- let selectedFiles=[];
- // 업로드 화면에 들어올 때는 항상 반을 직접 선택하게 한다.
- const choose='<option value="" selected>선택</option>'+
-  state.classes.map(x=>'<option value="'+x.classNo+'">'+x.classNo+'반</option>').join('');
+ // 새 작업에는 '선택'을 기본으로, 진행 중인 임시 작업에는 이전에 고른 반을 유지.
+ const choose='<option value=""'+(!selectedClassNo?' selected':'')+'>선택</option>'+
+  state.classes.map(x=>'<option value="'+x.classNo+'"'+(String(x.classNo)===String(selectedClassNo)?' selected':'')+'>'+x.classNo+'반</option>').join('');
  main(heading('UPLOAD ANSWERS','답안 PDF 업로드','학생별 1~5장 · 다음 학생 첫 장에서 분리 · STEP별 페이지 자동/수동 정렬')+
  '<div class="panel"><div class="panel-head"><h2>01. 업로드 대상 학생</h2></div>'+
- '<div class="form-grid"><div class="field"><label>학급</label><select id="fuClass">'+choose+'</select></div>'+
- '<div class="field"><label>시작 번호</label><input type="number" id="fuStart" placeholder="반 선택 후 자동 입력" disabled></div>'+
- '<div class="field"><label>마지막 번호</label><input type="number" id="fuEnd" placeholder="반 선택 후 자동 입력" disabled></div></div>'+
+ '<div class="form-grid"><div class="field"><label>학급</label><select id="fuClass">'+choose+'</select></div></div>'+
  '<p class="help-text" id="fuExpected"></p><div class="panel-head"><h2>02. PDF 파일 선택</h2></div>'+
  '<div id="fuDropzone" class="pdf-dropzone" role="button" tabindex="0" aria-label="PDF 파일 여러 개 끌어놓기 또는 클릭해서 추가">'+
  '<strong>⇩ PDF 파일을 여기로 끌어다 놓으세요</strong><span>3반 PDF 3개도 한꺼번에 추가 가능 · 클릭해서 추가 선택</span></div>'+
  '<div class="pdf-file-picker"><input class="control" type="file" id="fuFiles" accept=".pdf,application/pdf" multiple aria-label="PDF 여러 개 선택"></div>'+
  '<div id="fuFileList" class="pdf-file-list" aria-live="polite"></div>'+
- '<p class="help-text">선택한 모든 파일을 표시된 순서대로 연결하여 분석합니다. ↑↓ 버튼으로 순서를 변경할 수 있습니다. 학생당 1~5장입니다.</p>'+ 
+ '<p class="help-text">반 전체가 아니어도 업로드 가능합니다. PDF에 실제 포함된 학생을 AI가 인식하고 아래에서 학생 번호를 확인·수정합니다. 학생당 1~5장입니다.</p>'+ 
  '<label class="pdf-auto-vision"><input type="checkbox" id="fuAutoVision" checked> <span><strong>스캔본의 인쇄 제목·문항·페이지 모양까지 AI가 자동 판별</strong><small>PDF 분석 후 AI 실행 전 개인정보 외부 전송·비용에 관한 확인창이 나타납니다. 동의하지 않으면 AI는 호출되지 않습니다.</small></span></label>'+
  '<div class="sub-actions"><button class="btn secondary" id="fuDiagnose">AI 서버 연결 점검 (PDF 미전송)</button>'+
  '<button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
  '<button class="btn secondary" id="fuAiScan" disabled>↻ AI로 미판별 페이지 다시 분석</button>'+ 
  '<button class="btn secondary" id="fuStopAi" disabled hidden>AI 페이지 판별 중단</button></div>'+
  '<p id="fuDiagnosticStatus" class="help-text" role="status">먼저 AI 서버 연결을 점검하세요. PDF 이미지와 학생정보는 전송하지 않습니다.</p>'+
- '<p id="fuStatus" class="help-text" role="status"></p></div>'+
+ '<p id="fuStatus" class="help-text" role="status"></p>'+
+ '<p id="fuDraftStatus" class="help-text" role="status">선택한 PDF와 판별 작업은 이 브라우저에 임시 저장됩니다. 공용 PC라면 작업 후 임시 자료를 삭제하세요.</p>'+
+ '<button type="button" class="btn secondary" id="fuDeleteDraft">임시 업로드 작업 삭제</button></div>'+
  '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. AI 페이지 판별·학생별 분리 확인</h2></div>'+ 
  '<div id="fuAiProgress" class="pdf-ai-progress" role="status" aria-live="polite">'+
  '<div class="pdf-ai-progress-head"><strong id="fuAiProgressTitle">AI 분석 전</strong><span id="fuAiProgressCount">0/0쪽</span></div>'+
@@ -64,48 +70,26 @@ export function renderFlexibleUpload(ctx){
  '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div>');
  const updateExpected=(resetForClassChange=false)=>{
   const cur=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
-  const selected=!!cur;
-  el('fuStart').disabled=!selected;
-  el('fuEnd').disabled=!selected;
-  el('fuInspect').disabled=!selected;
-  if(!selected){
-   el('fuExpected').textContent='먼저 업로드할 학급을 선택하세요. 선택하면 해당 학급 전체 번호 범위가 자동으로 입력됩니다.';
-  }else{
-   const a=Number(el('fuStart').value),b=Number(el('fuEnd').value);
-   let nums=[];
-   try{nums=activeNumbers(cur,a,b);}catch{}
-   el('fuExpected').textContent=cur.classNo+'반 · 결번 제외 '+nums.length+'명 ('+nums.map(n=>n+'번').join(', ')+') · 페이지 수는 1인 최대 5장';
-  }
-  if(resetForClassChange){
-   resetReview();
-  }else if(session){
-   // Keep the already classified PDF pages when correcting just the selected
-   // student-number range. Revalidate groups before allowing any upload.
-   el('fuConfirm').checked=false;
+  el('fuInspect').disabled=!cur;
+  el('fuExpected').textContent=cur
+   ?cur.classNo+'반 · 등록된 학생 '+activeNumbers(cur).length+'명 · 이 중 PDF에 포함된 학생만 업로드할 수 있습니다.'
+   :'먼저 업로드할 학급을 선택하세요. 특정 학생 몇 명의 PDF만 있어도 업로드 가능합니다.';
+  if(resetForClassChange)resetReview();
+  else if(session){
+   el('fuConfirm').checked=draftConfirmed;
    checkGroups();
   }
  };
  el('fuClass').onchange=()=>{
-  const k=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
-  if(k){
-   ui.classNo=k.classNo;
-   ui.startNo=k.startNo;
-   ui.endNo=k.endNo;
-   for(const id of ['fuStart','fuEnd']){
-    const input=el(id);input.min=k.startNo;input.max=k.endNo;
-   }
-   el('fuStart').value=k.startNo;el('fuEnd').value=k.endNo;
-  }else{
-   el('fuStart').value='';el('fuEnd').value='';
-  }
+  selectedClassNo=el('fuClass').value;
+  if(selectedClassNo)ui.classNo=Number(selectedClassNo);
   updateExpected(true);
+  persistProgress();
  };
- el('fuStart').oninput=()=>updateExpected();
- el('fuEnd').oninput=()=>updateExpected();
  const report=s=>{if(el('fuStatus'))el('fuStatus').textContent=s};
- let analysisBusy=false,visualBusy=false,visualCancel=false,aiServerReady=false;
+ let analysisBusy=false,visualBusy=false,visualCancel=false;
  const resetReview=()=>{
-  session=null;
+  session=null;draftConfirmed=false;
   el('fuReview').hidden=true;
   el('fuAiScan').disabled=true;
   el('fuUpload').disabled=true;
@@ -174,25 +158,56 @@ export function renderFlexibleUpload(ctx){
  function targetNumbers(){
   const k=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
   if(!k)throw Error('업로드할 학급을 먼저 선택하세요.');
-  return activeNumbers(k,Number(el('fuStart').value),Number(el('fuEnd').value));
+  return activeNumbers(k);
  }
  function checkGroups(){
   try{
    if(!session)throw Error('파일 분석을 먼저 실행하세요.');
-   const nums=targetNumbers();
-   if(!nums.length)throw Error('선택한 범위에는 학생이 없습니다.');
-   const groups=groupPages(session.pages,nums);
-   session.groups=groups;
-   const messages=groups.map((g,i)=>{
+   const cur=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
+   if(!cur)throw Error('학급을 선택하세요.');
+   const active=new Set(targetNumbers());
+   const registered=state.roster.filter(x=>x.classNo===cur.classNo&&active.has(x.number)).sort((a,b)=>a.number-b.number);
+   const rawGroups=groupPages(session.pages);
+   session.assignByStart??={};
+   const used=new Set(),duplicates=[],unassigned=[],missing=[];
+   const summaries=rawGroups.map((g,i)=>{
+    const first=g.pages[0],key=String(session.pages.indexOf(first));
+    if(!Object.hasOwn(session.assignByStart,key)){
+     const suggested=recognizedStudentNumber(first.recognizedNo,cur.classNo);
+     const byName=registered.filter(x=>first.recognizedName&&x.name===first.recognizedName);
+     session.assignByStart[key]=active.has(suggested)&&registered.some(x=>x.number===suggested)
+      ?suggested:byName.length===1?byName[0].number:0;
+    }
+    const number=Number(session.assignByStart[key])||0;
+    if(!number)unassigned.push(i+1);
+    else if(used.has(number))duplicates.push(number);
+    else used.add(number);
+    if(number&&!active.has(number))missing.push(number);
+    const chosen=registered.find(x=>x.number===number);
+    const previewNo=first.recognizedNo?esc(first.recognizedNo):'미인식';
+    const previewName=first.recognizedName?esc(first.recognizedName):'미인식';
     const src=g.pages.map(p=>esc(p.fileName)+' '+p.pageNo+'쪽('+esc(ROLE_NAMES[p.role])+')').join(' → ');
-    const student=state.roster.find(x=>x.classNo===Number(el('fuClass').value)&&x.number===g.number);
-    return '<tr><td>'+(i+1)+'</td><td>'+g.number+'번 '+esc(student?.name||'미등록')+'</td><td>'+g.pages.length+'장</td><td>'+src+'</td><td>'+g.missingRoles.map(x=>esc(ROLE_NAMES[x])).join(', ')+'</td></tr>';
+    const options='<option value="">학생 번호 선택</option>'+
+      registered.map(st=>'<option value="'+st.number+'"'+(st.number===number?' selected':'')+'>'+st.number+'번 '+esc(st.name)+'</option>').join('');
+    return '<tr><td>'+(i+1)+'</td><td><select class="control" data-group-number="'+key+'">'+options+'</select>'+
+     '<small>AI 인식 학번 '+previewNo+' · 이름 '+previewName+'</small></td><td>'+g.pages.length+'장</td>'+
+     '<td>'+src+'</td><td>'+g.missingRoles.map(x=>esc(ROLE_NAMES[x])).join(', ')+'</td></tr>';
    }).join('');
-   const missingStudents=groups.filter(g=>!state.roster.some(x=>x.classNo===Number(el('fuClass').value)&&x.number===g.number));
-   el('fuGroupSummary').innerHTML='<strong>'+groups.length+'명 확인 · 총 '+session.pages.length+'장</strong>'+
-   '<div class="table-wrap"><table class="small-table"><thead><tr><th>순서</th><th>예상 학생</th><th>장수</th><th>정렬된 원본 페이지</th><th>없어진 장</th></tr></thead><tbody>'+messages+'</tbody></table></div>'+
-   (missingStudents.length?'<p class="attention">학생 명단이 없는 번호가 있습니다. 명단을 먼저 등록하세요.</p>':'');
-   el('fuUpload').disabled=missingStudents.length>0||!el('fuConfirm').checked;
+   const assignedNumbers=rawGroups.map(g=>Number(session.assignByStart[String(session.pages.indexOf(g.pages[0]))])||0);
+   const allValid=!unassigned.length&&!duplicates.length&&!missing.length;
+   session.groups=allValid?groupPages(session.pages,assignedNumbers):null;
+   const notice=unassigned.length?' · 번호 미확인 '+unassigned.length+'명':'';
+   const duplicateNotice=duplicates.length?' · 중복 번호 '+[...new Set(duplicates)].join(', ')+'번':'';
+   const invalidNotice=missing.length?' · 등록되지 않은 번호 '+[...new Set(missing)].join(', ')+'번':'';
+   el('fuGroupSummary').innerHTML='<strong>PDF에서 학생 '+rawGroups.length+'명 분리 · '+session.pages.length+'장'+notice+duplicateNotice+invalidNotice+'</strong>'+
+    '<p>각 학생 첫 장의 학번·이름을 확인하고 아래 번호를 선택하세요. 반 전체 학생을 모두 포함할 필요는 없습니다. 번호가 확인되어야 저장할 수 있습니다.</p>'+
+    '<div class="table-wrap"><table class="small-table"><thead><tr><th>순서</th><th>몇 번 학생 자료인가요?</th><th>장수</th><th>정렬된 원본 페이지</th><th>누락된 STEP</th></tr></thead><tbody>'+summaries+'</tbody></table></div>';
+   el('fuGroupSummary').querySelectorAll('[data-group-number]').forEach(input=>input.onchange=()=>{
+    session.assignByStart[input.dataset.groupNumber]=Number(input.value)||0;
+    draftConfirmed=false;el('fuConfirm').checked=false;
+    persistProgress();checkGroups();
+   });
+   el('fuUpload').disabled=!allValid||!el('fuConfirm').checked;
   }catch(e){
    session.groups=null;
    el('fuGroupSummary').textContent='확인 필요: '+e.message;
