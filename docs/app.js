@@ -121,13 +121,43 @@ function bindSchoolExcelPanel(){
 }
 
 function renderSettings(){const classes=state.classes.length?state.classes:Array.from({length:11},(_,i)=>({classNo:i+1,startNo:1,endNo:30}));main(heading('CLASS & RUBRIC','학급·채점 기준 설정','학급별 남학생(1~20번)·여학생(21번 이후) 번호 범위와 결번을 설정합니다.')+schoolExcelPanel()+
- `<div class="panel"><div class="panel-head"><h2>학급별 번호 및 결번 설정</h2><div class="sub-actions">${button('addClass','＋ 학급 추가')}${button('saveClasses','학급 저장','primary')}</div></div><div class="table-wrap"><table class="class-table small-table"><thead><tr><th>반</th><th>시작 번호</th><th>마지막 번호</th><th>결번 번호 (쉼표·범위)</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>실제 학생 수 (자동 계산)</th><th>등록 학생</th><th></th></tr></thead><tbody id="classRows">${classes.map(c=>classRow(c)).join('')}</tbody></table></div><div class="rubric-note class-count-summary" id="classCountSummary" aria-live="polite"></div><div class="rubric-note">실제 학생 수는 마지막 번호 − 시작 번호 + 1 − 결번 수로 자동 계산되며, 값 입력 즉시 갱신됩니다. 30번은 최초 예시값으로 수정 가능합니다. 남학생 번호는 1~20번, 여학생 번호는 21번부터 표시합니다. 결번 예: 3, 8, 23-25. 결번에는 학생 이름이나 PDF를 배정하지 않습니다. 등록된 학생·답안이 있는 번호는 결번으로 바꿀 수 없습니다.</div></div>
+ `<div class="panel"><div class="panel-head"><h2>학급별 번호 및 결번 설정</h2><div class="sub-actions">${button('addClass','＋ 학급 추가')}${button('saveClasses','학급 저장','primary')}</div></div><div class="table-wrap"><table class="class-table small-table"><thead><tr><th>반</th><th>시작 번호</th><th>마지막 번호</th><th>결번 번호 (쉼표·범위)</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>실제 학생 수 (자동 계산)</th><th>등록 학생</th><th></th></tr></thead><tbody id="classRows">${classes.map(c=>classRow(c)).join('')}</tbody></table></div><div class="rubric-note class-count-summary" id="classCountSummary" aria-live="polite"></div><div class="rubric-note">엑셀로 등록·병합한 반은 남학생(1~20번)과 여학생(21번 이후)의 실제 첫·끝 번호를 각각 사용하여 결번과 학생 수를 계산합니다. 두 성별 구간 사이의 번호는 자동으로 제외됩니다. 명단에 학생을 추가할 때는 위 엑셀 병합 기능을 사용하세요. 이미 등록된 이름이나 PDF가 있는 번호를 결번으로 지정할 수 없습니다.</div></div>
  <div class="panel"><div class="panel-head"><h2>수준별 점수 설정</h2>${button('saveRubric','배점 저장','primary')}</div><div class="notice warn">아래 배점은 임시값입니다. 학교의 확정된 수행평가 평가계획과 반드시 대조하여 사용하세요.</div><div class="table-wrap" style="margin-top:15px"><table class="rubric-table small-table"><thead><tr><th>영역</th>${LEVELS.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${AREA_KEYS.map(a=>`<tr><td>${esc(state.rubric[a].name)} (${state.rubric[a].max}점)</td>${LEVELS.map(l=>`<td><input type="number" class="rubric-input" data-area="${a}" data-level="${l}" min="0" max="${state.rubric[a].max}" value="${state.rubric[a].scores[l]}"></td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="rubric-note">확정된 학생의 점수는 저장 당시 점수로 고정됩니다. 기준 변경 후에는 기존 미확정 점수도 다시 확인하세요.</p></div>`);
  bindSchoolExcelPanel();
  $('addClass').onclick=()=>{const v=[...$('classRows').querySelectorAll('tr')].map(row=>Number(row.querySelector('[data-field="classNo"]').value));let n=1;while(v.includes(n))n++;if(v.length>=50)return toast('학급은 최대 50개까지 등록 가능합니다.',true);$('classRows').insertAdjacentHTML('beforeend',classRow({classNo:n,startNo:1,endNo:30}));updateClassCounts();};
  $('classRows').onclick=e=>{if(e.target.matches('.remove-row')){e.target.closest('tr').remove();updateClassCounts();}};$('classRows').addEventListener('input',updateClassCounts);$('classRows').addEventListener('change',updateClassCounts);updateClassCounts();
- $('saveClasses').onclick=()=>safe(async()=>{const rows=[...$('classRows').querySelectorAll('tr')];const values=rows.map(r=>{const c={classNo:Number(r.querySelector('[data-field="classNo"]').value),startNo:Number(r.querySelector('[data-field="startNo"]').value),endNo:Number(r.querySelector('[data-field="endNo"]').value)};c.missingNos=parseMissingNumbers(r.querySelector('[data-field="missingNos"]').value,c.startNo,c.endNo);return {...c,gradeNo:1,...genderRangesForClass(c)};});if(values.length<1||values.length>50)throw Error('학급은 1~50개 설정해야 합니다.');values.forEach(assertClass);if(new Set(values.map(x=>x.classNo)).size!==values.length)throw Error('반 번호가 중복되었습니다.');for(const x of [...state.roster,...state.submissions.map(s=>({classNo:s.classNo,number:s.assignedNo}))]){const k=values.find(c=>c.classNo===x.classNo);if(!k||x.number<k.startNo||x.number>k.endNo||k.missingNos.includes(x.number))throw Error(`${x.classNo}반 ${x.number}번은 등록 자료가 있어 번호 삭제·결번 지정이 불가능합니다.`);}const b=writeBatch(db);state.classes.forEach(c=>{if(!values.some(v=>v.classNo===c.classNo))b.delete(doc(db,'classes',String(c.classNo)))});values.forEach(c=>b.set(doc(db,'classes',String(c.classNo)),c));await b.commit();toast('학급 범위를 저장했습니다.');await nav('settings')});
+ $('saveClasses').onclick=()=>safe(async()=>{
+  const rows=[...$('classRows').querySelectorAll('tr')];
+  const values=rows.map(readClassRow);
+  if(values.length<1||values.length>50)throw Error('학급은 1~50개 설정해야 합니다.');
+  values.forEach(assertClass);
+  if(new Set(values.map(x=>x.classNo)).size!==values.length)throw Error('반 번호가 중복되었습니다.');
+  for(const x of [...state.roster,...state.submissions.map(s=>({classNo:s.classNo,number:s.assignedNo}))]){
+   const k=values.find(c=>c.classNo===x.classNo);
+   if(!k||!activeNumbers(k).includes(x.number))
+    throw Error(x.classNo+'반 '+x.number+'번은 등록된 학생·답안이 있으므로 번호를 삭제하거나 결번 처리할 수 없습니다.');
+  }
+  const batch=writeBatch(db);
+  state.classes.forEach(c=>{if(!values.some(v=>v.classNo===c.classNo))batch.delete(doc(db,'classes',String(c.classNo)));});
+  values.forEach(c=>batch.set(doc(db,'classes',String(c.classNo)),c));
+  await batch.commit();
+  toast('학급 범위를 저장했습니다. 기존 학생·답안 정보는 유지됩니다.');
+  await nav('settings');
+ });
  $('saveRubric').onclick=()=>safe(async()=>{const r=structuredClone(state.rubric);document.querySelectorAll('.rubric-input').forEach(el=>r[el.dataset.area].scores[el.dataset.level]=Number(el.value));verifyRubric(r);await setDoc(doc(db,'settings','rubric'),{areas:r,updatedAt:serverTimestamp()});toast('배점이 저장되었습니다.');await nav('settings')});}
+function readClassRow(row){
+ const c={classNo:Number(row.querySelector('[data-field="classNo"]').value),
+  startNo:Number(row.querySelector('[data-field="startNo"]').value),
+  endNo:Number(row.querySelector('[data-field="endNo"]').value)};
+ c.missingNos=parseMissingNumbers(row.querySelector('[data-field="missingNos"]').value,c.startNo,c.endNo);
+ const previous=state.classes.find(x=>x.classNo===c.classNo);
+ if(previous?.genderBandsDefined===true){
+  if(c.startNo!==previous.startNo||c.endNo!==previous.endNo)
+   throw Error(c.classNo+'반은 남녀 실제 번호 범위가 엑셀 병합으로 등록되어 있습니다. 범위를 늘리려면 학생 명단 엑셀로 추가해 주세요.');
+  return {...previous,...c,gradeNo:1,missingNos:c.missingNos};
+ }
+ return {...c,gradeNo:1,...genderRangesForClass(c)};
+}
 function classRow(c){const missing=c.missingNos||[];return `<tr><td><input type="number" data-field="classNo" min="1" max="99" value="${c.classNo}"></td><td><input type="number" data-field="startNo" min="1" max="99" value="${c.startNo}"></td><td><input type="number" data-field="endNo" min="1" max="99" value="${c.endNo}"></td><td><input type="text" data-field="missingNos" class="missing-input" placeholder="예: 3, 8, 23-25" value="${esc(missing.join(', '))}"></td><td><span data-gender-range="boysStart">${genderRangesForClass(c).boysStart??'—'}</span></td><td><span data-gender-range="boysEnd">${genderRangesForClass(c).boysEnd??'—'}</span></td><td><span data-gender-range="girlsStart">${genderRangesForClass(c).girlsStart??'—'}</span></td><td><span data-gender-range="girlsEnd">${genderRangesForClass(c).girlsEnd??'—'}</span></td><td><strong data-student-count class="class-student-count">${activeNumbers(c).length}명</strong></td><td>${state.roster.filter(x=>x.classNo===c.classNo).length}명</td><td><button class="btn link remove-row" type="button">삭제</button></td></tr>`}
 
 function updateClassCounts(){
@@ -139,8 +169,9 @@ function updateClassCounts(){
    const endNo=Number(row.querySelector('[data-field="endNo"]').value);
    const classNo=Number(row.querySelector('[data-field="classNo"]').value);
    const missingNos=parseMissingNumbers(row.querySelector('[data-field="missingNos"]').value,startNo,endNo);
-   const countNow=activeNumbers({classNo,startNo,endNo,missingNos}).length;
-   count.textContent=countNow+'명';count.title='';count.classList.remove('count-invalid');const genders=genderRangesForClass({classNo,startNo,endNo,missingNos});for(const key of Object.keys(genders))row.querySelector('[data-gender-range="'+key+'"]').textContent=genders[key]??'—';total+=countNow;
+   const model=readClassRow(row);
+   const countNow=activeNumbers(model).length;
+   count.textContent=countNow+'명';count.title='';count.classList.remove('count-invalid');const genders=genderRangesForClass(model);for(const key of Object.keys(genders))row.querySelector('[data-gender-range="'+key+'"]').textContent=genders[key]??'—';total+=countNow;
   }catch(e){invalid++;count.textContent='입력 확인';count.title=e.message;count.classList.add('count-invalid');for(const el of row.querySelectorAll('[data-gender-range]'))el.textContent='—';}
  }
  const summary=$('classCountSummary');
@@ -151,7 +182,7 @@ function updateClassCounts(){
 }
 function rosterSlot(klass,n){const missing=(klass.missingNos||[]).includes(n);if(missing)return `<div class="roster-entry roster-missing"><span>${n}번</span><em>결번</em></div>`;return `<label class="roster-entry"><span>${n}번</span><input data-student="${n}" maxlength="80" placeholder="이름" value="${esc(studentName(klass.classNo,n)==='미등록'?'':studentName(klass.classNo,n))}" /></label>`}
 function renderRoster(){if(!state.classes.length){main(heading('STUDENT ROSTER','학생 명단 관리','학급을 먼저 등록해야 합니다.')+`<div class="panel">학급 설정을 먼저 저장하세요. ${button('toSettings','설정으로 이동','primary')}</div>`);$('toSettings').onclick=()=>nav('settings');return;}const klass=cBy(ui.rosterClass)||state.classes[0];ui.rosterClass=klass.classNo;main(heading('STUDENT ROSTER','학생 명단 관리','학교 번호 체계에 따라 남학생은 1~20번, 여학생은 21번부터 표시합니다. 결번은 학급 설정에서 지정합니다.')+schoolExcelPanel()+
- `<div class="panel"><div class="panel-head"><h2>${klass.classNo}반 학생 이름 (결번 ${((klass.missingNos||[]).length)}개)</h2><div class="toolbar"><select class="control" id="rosterClass">${optsClass(ui.rosterClass)}</select>${button('saveRoster','명단 저장','primary')}</div></div><div class="roster-band-title">남학생 번호 (1~20번)</div><div class="roster-grid">${Array.from({length:Math.max(0,Math.min(20,klass.endNo)-klass.startNo+1)},(_,i)=>i+klass.startNo).map(n=>rosterSlot(klass,n)).join('')}</div><div class="roster-band-title">여학생 번호 (21번부터)</div><div class="roster-grid">${Array.from({length:Math.max(0,klass.endNo-Math.max(21,klass.startNo)+1)},(_,i)=>i+Math.max(21,klass.startNo)).map(n=>rosterSlot(klass,n)).join('')}</div><p class="help-text">회색 결번 칸은 학생이 없으므로 이름을 입력하지 않습니다. 결번은 [설정]에서 변경하며, 이미 답안이 등록된 번호는 삭제할 수 없습니다.</p></div><div class="panel"><div class="panel-head"><h2>CSV 명단 일괄 등록</h2></div><p class="thin-note">CSV 형식: <code>반,번호,이름</code> · 여러 학급 한 번에 등록 가능 · UTF-8 또는 CP949 지원</p><div class="toolbar"><input id="rosterCsv" class="control" type="file" accept=".csv,text/csv">${button('importRoster','CSV 가져오기','primary')}${button('downloadSample','CSV 양식 다운로드')}</div></div>`);
+ `<div class="panel"><div class="panel-head"><h2>${klass.classNo}반 학생 이름 (결번 ${((klass.missingNos||[]).length)}개)</h2><div class="toolbar"><select class="control" id="rosterClass">${optsClass(ui.rosterClass)}</select>${button('saveRoster','명단 저장','primary')}</div></div><div class="roster-band-title">남학생 번호 (1~20번)</div><div class="roster-grid">${(klass.genderBandsDefined?activeNumbers(klass).filter(n=>n<=20):Array.from({length:Math.max(0,Math.min(20,klass.endNo)-klass.startNo+1)},(_,i)=>i+klass.startNo)).map(n=>rosterSlot(klass,n)).join('')}</div><div class="roster-band-title">여학생 번호 (21번부터)</div><div class="roster-grid">${(klass.genderBandsDefined?activeNumbers(klass).filter(n=>n>=21):Array.from({length:Math.max(0,klass.endNo-Math.max(21,klass.startNo)+1)},(_,i)=>i+Math.max(21,klass.startNo))).map(n=>rosterSlot(klass,n)).join('')}</div><p class="help-text">회색 결번 칸은 학생이 없으므로 이름을 입력하지 않습니다. 결번은 [설정]에서 변경하며, 이미 답안이 등록된 번호는 삭제할 수 없습니다.</p></div><div class="panel"><div class="panel-head"><h2>CSV 명단 일괄 등록</h2></div><p class="thin-note">CSV 형식: <code>반,번호,이름</code> · 여러 학급 한 번에 등록 가능 · UTF-8 또는 CP949 지원</p><div class="toolbar"><input id="rosterCsv" class="control" type="file" accept=".csv,text/csv">${button('importRoster','CSV 가져오기','primary')}${button('downloadSample','CSV 양식 다운로드')}</div></div>`);
  bindSchoolExcelPanel();
  $('rosterClass').onchange=e=>{ui.rosterClass=Number(e.target.value);renderRoster()};
  $('saveRoster').onclick=()=>safe(async()=>{const updates=[...document.querySelectorAll('[data-student]')].map(e=>({classNo:klass.classNo,number:Number(e.dataset.student),name:e.value.trim()}));if(updates.some(v=>v.name.length>80))throw Error('이름은 80자까지 입력 가능합니다.');for(const x of updates){if(!x.name&&state.submissions.some(s=>s.classNo===x.classNo&&s.assignedNo===x.number))throw Error(`${x.number}번은 답안이 있으므로 이름을 지울 수 없습니다.`)}const b=writeBatch(db);updates.forEach(x=>{const d=doc(db,'roster',`${x.classNo}-${x.number}`);if(x.name)b.set(d,x);else b.delete(d)});await b.commit();toast('학생 명단을 저장했습니다.');await nav('roster')});
