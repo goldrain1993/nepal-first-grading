@@ -197,8 +197,8 @@ export function renderFlexibleUpload(ctx){
   // A callable request rejected before the handler can surface as Firebase "internal [0]".
   // Do NOT retry explicit validation, authorization or OpenAI quota errors.
   if(/permission-denied|unauthenticated|invalid-argument|resource-exhausted|failed-precondition|deadline-exceeded/.test(code))return false;
-  return /\\b503\\b/.test(message) || code.includes('functions/unavailable') ||
-   (code.includes('functions/internal') && /^internal(?:\\s*\\[0\\])?$/.test(message));
+  return /\b503\b/.test(message) || code.includes('functions/unavailable') ||
+   (code.includes('functions/internal') && /^internal(?:\s*\[0\])?$/.test(message));
  }
  function friendlyAiError(error){
   const raw=String(error?.message||error||'');
