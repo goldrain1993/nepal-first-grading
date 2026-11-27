@@ -193,6 +193,10 @@ export function renderFlexibleUpload(ctx){
   detail.textContent=(message?message+' · ':'')+'AI 확실 '+high+'쪽 / AI 확인 권장 '+medium+'쪽 / AI 판별 불확실 '+uncertain+'쪽 / 아직 AI 미분석 '+pending+'쪽';
   if(retry)retry.disabled=analysisBusy||visualBusy||!pages.some(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
  }
+ function isAiResultCountMismatch(error){
+  const message=String(error?.message||error||'');
+  return /AI 페이지 분류 결과 개수가 일치하지 않습니다|AI가 응답한 페이지 수가 일치하지 않습니다/.test(message);
+ }
  function isLikelyTransient503(error){
   const code=String(error?.code||'').toLowerCase();
   const message=String(error?.message||'').trim().toLowerCase();
@@ -245,7 +249,44 @@ export function renderFlexibleUpload(ctx){
   updateAiProgress('running','요청한 '+candidates.length+'쪽을 순차 처리합니다.');
   try{
    const callable=httpsCallable(ctx.functions,'inspectPages',{timeout:120000});
-   const batchSize=4; // 155쪽처럼 많은 스캔도 한 번에 4쪽씩 보내 timeout/요청량을 줄인다.
+   // 답안은 학생별 최대 5장. AI 전송도 최대 5장 단위로 구성하되
+   // 순서와 관계없이 인쇄 양식으로 STEP을 판별한다. 일부 장이 빠진 학생도 지원.
+   const batchSize=5;
+   // 생성형 모델이 N장 중 일부 결과만 반환하면 N -> ceil(N/2)+floor(N/2)
+   // -> 1장까지 자동 분할해서 빠진 결과를 재요청한다.
+   // 실패가 1장 단위에서도 반복되면 그 페이지만 교사 확인 대상으로 남긴다.
+   async function classifyWithSplit(images,batchNumber,totalBatches){
+    try{
+     let response;
+     try{
+      response=await callable({images});
+     }catch(firstError){
+      if(!isLikelyTransient503(firstError)||visualCancel)throw firstError;
+      report('Cloud Run AI 서버 일시 오류(503 가능): '+batchNumber+'/'+totalBatches+'회차를 한 번만 재시도합니다.');
+      updateAiProgress('running','서버 일시 오류 · 2초 후 재시도 1회');
+      await new Promise(resolve=>setTimeout(resolve,2000));
+      if(visualCancel)throw Error('교사 요청에 따라 AI 자동 분석을 중단했습니다.');
+      response=await callable({images});
+     }
+     const pages=response.data?.pages;
+     if(!Array.isArray(pages)||pages.length!==images.length)
+      throw Error('AI가 응답한 페이지 수가 일치하지 않습니다. 요청 '+images.length+'쪽 / 결과 '+(Array.isArray(pages)?pages.length:'형식 오류')+'.');
+     return pages;
+    }catch(error){
+     if(!isAiResultCountMismatch(error))throw error;
+     if(images.length===1){
+      report('1쪽 단위 AI 응답도 누락됨 · 해당 장은 직접 확인 대상으로 남기고 계속 진행합니다.');
+      return [{role:'unknown',studentNo:'',studentName:'',confidence:'낮음',reason:'AI 응답 누락 · 인쇄된 STEP을 교사가 직접 확인해 주세요.'}];
+     }
+     const midpoint=Math.ceil(images.length/2);
+     report('AI 반환 페이지 수 불일치 · '+images.length+'쪽 요청을 '+midpoint+'쪽과 '+(images.length-midpoint)+'쪽으로 나눠 다시 분석합니다.');
+     updateAiProgress('running','AI 응답 누락 자동 복구: '+images.length+'쪽을 소규모로 분할하여 재시도');
+     const left=await classifyWithSplit(images.slice(0,midpoint),batchNumber,totalBatches);
+     if(visualCancel)throw Error('교사 요청에 따라 AI 자동 분석을 중단했습니다.');
+     const right=await classifyWithSplit(images.slice(midpoint),batchNumber,totalBatches);
+     return left.concat(right);
+    }
+   }
    for(let offset=0;offset<candidates.length;offset+=batchSize){
     if(visualCancel)break;
     const chunk=candidates.slice(offset,offset+batchSize);
@@ -257,24 +298,8 @@ export function renderFlexibleUpload(ctx){
     for(const p of chunk)images.push(await thumbnail(p,1.35));
     let results;
     try{
-     let response;
-     try{
-      response=await callable({images});
-     }catch(firstError){
-      if(!isLikelyTransient503(firstError)||visualCancel)throw firstError;
-      // One bounded retry for transient Cloud Run 503; never retry policy/auth/quota errors.
-      // If the prior response was lost after AI processing, another call can incur costs.
-      report('Cloud Run AI 서버 일시 오류(503 가능): '+batchNumber+'/'+totalBatches+'회차를 한 번만 재시도합니다.');
-      updateAiProgress('running','첫 호출 실패 · 2초 후 서버 재시도 1회');
-      await new Promise(resolve=>setTimeout(resolve,2000));
-      if(visualCancel)throw Error('교사 요청에 따라 AI 자동 분석을 중단했습니다.');
-      response=await callable({images});
-     }
-     results=response.data?.pages;
-     if(!Array.isArray(results)||results.length!==chunk.length)
-      throw Error('AI가 응답한 페이지 수가 일치하지 않습니다. '+chunk.length+'쪽을 재분석해야 합니다.');
+     results=await classifyWithSplit(images,batchNumber,totalBatches);
     }catch(e){
-     // 한 묶음 실패 시 이미 성공한 이전 묶음을 유지한다. 인증/한도 오류를 반복 호출하지 않는다.
      const msg=friendlyAiError(e);
      const failedPositions=chunk.map(p=>p.fileName+' '+p.pageNo+'쪽').join(', ');
      throw Error('AI 자동 판별이 '+processed+'/'+candidates.length+'쪽에서 중단됐습니다. '
