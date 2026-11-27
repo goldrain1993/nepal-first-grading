@@ -27,15 +27,14 @@ export function renderFlexibleUpload(ctx){
  }
  session=null;
  let selectedFiles=[];
- const c=state.classes.find(x=>x.classNo===ui.classNo)||state.classes[0];
- ui.classNo=c.classNo;ui.startNo=Math.max(c.startNo,Math.min(c.endNo,ui.startNo));
- ui.endNo=Math.max(ui.startNo,Math.min(c.endNo,ui.endNo));
- const choose=state.classes.map(x=>'<option value="'+x.classNo+'"'+(x.classNo===ui.classNo?' selected':'')+'>'+x.classNo+'반</option>').join('');
+ // 업로드 화면에 들어올 때는 항상 반을 직접 선택하게 한다.
+ const choose='<option value="" selected>선택</option>'+
+  state.classes.map(x=>'<option value="'+x.classNo+'">'+x.classNo+'반</option>').join('');
  main(heading('UPLOAD ANSWERS','답안 PDF 업로드','학생별 1~5장 · 다음 학생 첫 장에서 분리 · STEP별 페이지 자동/수동 정렬')+
  '<div class="panel"><div class="panel-head"><h2>01. 업로드 대상 학생</h2></div>'+
  '<div class="form-grid"><div class="field"><label>학급</label><select id="fuClass">'+choose+'</select></div>'+
- '<div class="field"><label>시작 번호</label><input type="number" id="fuStart" min="'+c.startNo+'" max="'+c.endNo+'" value="'+ui.startNo+'"></div>'+
- '<div class="field"><label>마지막 번호</label><input type="number" id="fuEnd" min="'+c.startNo+'" max="'+c.endNo+'" value="'+ui.endNo+'"></div></div>'+
+ '<div class="field"><label>시작 번호</label><input type="number" id="fuStart" placeholder="반 선택 후 자동 입력" disabled></div>'+
+ '<div class="field"><label>마지막 번호</label><input type="number" id="fuEnd" placeholder="반 선택 후 자동 입력" disabled></div></div>'+
  '<p class="help-text" id="fuExpected"></p><div class="panel-head"><h2>02. PDF 파일 선택</h2></div>'+
  '<div id="fuDropzone" class="pdf-dropzone" role="button" tabindex="0" aria-label="PDF 파일 여러 개 끌어놓기 또는 클릭해서 추가">'+
  '<strong>⇩ PDF 파일을 여기로 끌어다 놓으세요</strong><span>3반 PDF 3개도 한꺼번에 추가 가능 · 클릭해서 추가 선택</span></div>'+
@@ -64,11 +63,19 @@ export function renderFlexibleUpload(ctx){
  '<div class="sub-actions"><label class="mini-check"><input type="checkbox" id="fuAutoAi"> 저장 후 AI 보조 채점도 실행 (별도 API 비용)</label></div>'+
  '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div>');
  const updateExpected=(resetForClassChange=false)=>{
-  const cur=state.classes.find(x=>x.classNo===Number(el('fuClass').value));
-  const a=Number(el('fuStart').value),b=Number(el('fuEnd').value);
-  let nums=[];
-  try{nums=activeNumbers(cur,a,b);}catch{}
-  el('fuExpected').textContent=cur.classNo+'반 · 결번 제외 '+nums.length+'명 ('+nums.map(n=>n+'번').join(', ')+') · 페이지 수는 1인 최대 5장';
+  const cur=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
+  const selected=!!cur;
+  el('fuStart').disabled=!selected;
+  el('fuEnd').disabled=!selected;
+  el('fuInspect').disabled=!selected;
+  if(!selected){
+   el('fuExpected').textContent='먼저 업로드할 학급을 선택하세요. 선택하면 해당 학급 전체 번호 범위가 자동으로 입력됩니다.';
+  }else{
+   const a=Number(el('fuStart').value),b=Number(el('fuEnd').value);
+   let nums=[];
+   try{nums=activeNumbers(cur,a,b);}catch{}
+   el('fuExpected').textContent=cur.classNo+'반 · 결번 제외 '+nums.length+'명 ('+nums.map(n=>n+'번').join(', ')+') · 페이지 수는 1인 최대 5장';
+  }
   if(resetForClassChange){
    resetReview();
   }else if(session){
@@ -79,8 +86,19 @@ export function renderFlexibleUpload(ctx){
   }
  };
  el('fuClass').onchange=()=>{
-  const k=state.classes.find(x=>x.classNo===Number(el('fuClass').value));
-  el('fuStart').value=k.startNo;el('fuEnd').value=k.endNo;updateExpected(true);
+  const k=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
+  if(k){
+   ui.classNo=k.classNo;
+   ui.startNo=k.startNo;
+   ui.endNo=k.endNo;
+   for(const id of ['fuStart','fuEnd']){
+    const input=el(id);input.min=k.startNo;input.max=k.endNo;
+   }
+   el('fuStart').value=k.startNo;el('fuEnd').value=k.endNo;
+  }else{
+   el('fuStart').value='';el('fuEnd').value='';
+  }
+  updateExpected(true);
  };
  el('fuStart').oninput=()=>updateExpected();
  el('fuEnd').oninput=()=>updateExpected();
@@ -154,7 +172,8 @@ export function renderFlexibleUpload(ctx){
  };
  renderFileList();
  function targetNumbers(){
-  const k=state.classes.find(x=>x.classNo===Number(el('fuClass').value));
+  const k=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
+  if(!k)throw Error('업로드할 학급을 먼저 선택하세요.');
   return activeNumbers(k,Number(el('fuStart').value),Number(el('fuEnd').value));
  }
  function checkGroups(){
