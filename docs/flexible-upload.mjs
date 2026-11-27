@@ -7,7 +7,7 @@ import {readUploadDraft,storeUploadFiles,storeUploadProgress,clearUploadDraft} f
 
 let session=null;
 let selectedFiles=[],selectedClassNo='',ownerId='',aiServerReady=false;
-let draftConfirmed=false,draftLoaded=false,draftAutoVision=true,draftAutoAi=false,draftQueue=Promise.resolve();
+let draftConfirmed=false,draftLoaded=false,draftAutoVision=true,draftQueue=Promise.resolve();
 const el=id=>document.getElementById(id);
 const label=(v)=>String(v??'—');
 const roleOptions=(selected)=>[['unknown','미판별 / 재검토'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
@@ -27,7 +27,7 @@ export function renderFlexibleUpload(ctx){
  const userId=ctx.userId||'';
  if(ownerId!==userId){
   session=null;selectedFiles=[];selectedClassNo='';aiServerReady=false;
-  draftConfirmed=false;draftLoaded=false;draftAutoVision=true;draftAutoAi=false;draftQueue=Promise.resolve();ownerId=userId;
+  draftConfirmed=false;draftLoaded=false;draftAutoVision=true;draftQueue=Promise.resolve();ownerId=userId;
  }
  if(!state.classes.length){
    main(heading('UPLOAD ANSWERS','PDF 업로드','먼저 학급을 설정하세요.')+'<div class="panel"><button class="btn primary" id="goSettings">학급 설정</button></div>');
@@ -66,7 +66,7 @@ export function renderFlexibleUpload(ctx){
  '<div class="table-wrap"><table class="small-table flexible-page-table"><thead><tr><th>원본 페이지</th><th>미리보기</th><th>새 학생 시작</th><th>STEP 구분</th><th>판독 메모</th></tr></thead><tbody id="fuPageRows"></tbody></table></div>'+
  '<div class="notice" id="fuGroupSummary"></div>'+
  '<label class="identity-check"><input id="fuConfirm" type="checkbox"> 원본 첫 장의 학번·이름과 학생별 페이지 범위·정렬 결과를 확인했습니다. 업로드 후 채점 화면에서도 첫 장을 다시 확인하겠습니다.</label>'+
- '<div class="sub-actions"><label class="mini-check"><input type="checkbox" id="fuAutoAi"> 저장 후 AI 보조 채점도 실행 (별도 API 비용)</label></div>'+
+ '<p class="help-text">이 단계에서는 학생별 PDF만 저장합니다. AI 채점은 저장 완료 후 [채점 현황]에서 별도로 실행합니다.</p>'+ 
  '<p class="notice warn" id="fuUploadBlockReason" role="status">학생별 PDF 판독과 번호 확인을 완료하면 저장할 수 있습니다.</p>'+ 
  '<div class="sub-actions"><button type="button" class="btn secondary" id="fuJumpIssue" hidden>미확인 학생 번호 확인하기</button>'+ 
  '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div></div>');
@@ -109,7 +109,7 @@ export function renderFlexibleUpload(ctx){
  }
  function progressSnapshot(){
   return {classNo:selectedClassNo,confirmed:draftConfirmed,
-   autoVision:draftAutoVision,autoAi:draftAutoAi,
+   autoVision:draftAutoVision,
    pages:session?.pages.map(p=>({
     fileIndex:selectedFiles.indexOf(p.file),pageNo:p.pageNo,role:p.role,start:p.start,
     needsVisual:p.needsVisual,visualChecked:p.visualChecked,manualEdited:p.manualEdited,
@@ -141,7 +141,7 @@ export function renderFlexibleUpload(ctx){
    const progress=draft.progress||{};
    selectedClassNo=state.classes.some(c=>String(c.classNo)===String(progress.classNo))?String(progress.classNo):'';
    draftConfirmed=!!progress.confirmed;
-   draftAutoVision=progress.autoVision!==false;draftAutoAi=!!progress.autoAi;
+   draftAutoVision=progress.autoVision!==false;
    if(progress.pages?.length){
     const resources=[];
     for(const file of selectedFiles){
@@ -162,7 +162,6 @@ export function renderFlexibleUpload(ctx){
    if(ui.page!=='upload'||!el('fuClass'))return;
    el('fuClass').value=selectedClassNo;
    el('fuAutoVision').checked=draftAutoVision;
-   el('fuAutoAi').checked=draftAutoAi;
    renderFileList();updateExpected();
    if(session){
     drawPageRows(true);el('fuAiScan').disabled=false;
@@ -527,7 +526,6 @@ export function renderFlexibleUpload(ctx){
  el('fuConfirm').onchange=()=>{draftConfirmed=el('fuConfirm').checked;checkGroups();persistProgress();};
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
  el('fuAutoVision').onchange=()=>{draftAutoVision=el('fuAutoVision').checked;persistProgress();};
- el('fuAutoAi').onchange=()=>{draftAutoAi=el('fuAutoAi').checked;persistProgress();};
  el('fuRetryVisual').onclick=()=>safe(async()=>{
   if(!aiServerReady)throw Error('먼저 상단의 AI 서버 연결 점검을 통과해야 합니다.');
   if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
@@ -681,12 +679,7 @@ export function renderFlexibleUpload(ctx){
    toast(groups.length+'명 답안 업로드 완료 (장수 1~5장, STEP 정렬)');
    report('업로드 완료, 채점 현황으로 이동합니다.');
    await loadAll();
-   if(el('fuAutoAi')?.checked && ctx.analyzeSubmission){
-    for(let i=0;i<ids.length;i++){
-     report((i+1)+'/'+ids.length+'명 AI 채점 중…');
-     try{await ctx.analyzeSubmission(ids[i]);}catch(e){toast('AI 채점 실패: '+e.message,true);break;}
-    }
-   }
+   // 저장과 AI 채점은 별도 절차: 여기서는 API 채점 요청을 호출하지 않는다.
    // Firebase에 저장을 마친 이후에만 브라우저 임시 PDF를 삭제한다.
    try{
     await draftQueue.catch(()=>{});
@@ -709,14 +702,13 @@ export function renderFlexibleUpload(ctx){
   await draftQueue.catch(()=>{});
   await clearUploadDraft(userId);
   session=null;selectedFiles=[];selectedClassNo='';draftConfirmed=false;
-  draftAutoVision=true;draftAutoAi=false;draftLoaded=true;
-  el('fuClass').value='';el('fuAutoVision').checked=true;el('fuAutoAi').checked=false;
+  draftAutoVision=true;draftLoaded=true;
+  el('fuClass').value='';el('fuAutoVision').checked=true;
   resetReview();renderFileList();updateExpected();
   el('fuDraftStatus').textContent='이 브라우저의 임시 작업을 삭제했습니다.';
   report('임시 PDF 파일과 판별 결과를 삭제했습니다. 새로운 작업을 시작할 수 있습니다.');
  });
  el('fuAutoVision').checked=draftAutoVision;
- el('fuAutoAi').checked=draftAutoAi;
  updateExpected();
  if(session){
   drawPageRows(true);
