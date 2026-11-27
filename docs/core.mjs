@@ -26,15 +26,38 @@ export function assertClass(c){
   if(!Number.isInteger(classNo)||classNo<1||classNo>99||!Number.isInteger(startNo)||!Number.isInteger(endNo)||startNo<1||startNo>endNo||endNo>99)throw Error('반 번호와 시작·마지막 번호를 확인하세요.');
   const missing=c.missingNos??[];
   if(!Array.isArray(missing)||missing.some(n=>!Number.isInteger(n)||n<startNo||n>endNo)||new Set(missing).size!==missing.length)throw Error('결번 목록을 확인하세요.');
+  if(c.genderBandsDefined===true){
+    const bounds=[['boysStart','boysEnd',1,20],['girlsStart','girlsEnd',21,99]];
+    for(const [first,last,min,max] of bounds){
+      const a=c[first],b=c[last];
+      if(a==null&&b==null)continue;
+      if(!Number.isInteger(a)||!Number.isInteger(b)||a<min||b>max||a>b||a<startNo||b>endNo)
+        throw Error('남녀 학생 번호 구간이 잘못 설정되었습니다.');
+    }
+    if(bounds.every(([first])=>c[first]==null))throw Error('학급에 등록된 남녀 번호 구간이 없습니다.');
+    if(missing.some(n=>!(c.boysStart!=null&&n>=c.boysStart&&n<=c.boysEnd)&&
+       !(c.girlsStart!=null&&n>=c.girlsStart&&n<=c.girlsEnd)))
+      throw Error('결번은 남학생 또는 여학생의 첫 번호부터 마지막 번호 사이에서만 지정할 수 있습니다.');
+  }
 }
 export function activeNumbers(c,startNo=c.startNo,endNo=c.endNo){
   assertClass(c);
   if(!Number.isInteger(startNo)||!Number.isInteger(endNo)||startNo<c.startNo||endNo>c.endNo||startNo>endNo)throw Error('학급과 학생 번호 범위를 확인하세요.');
   const missing=new Set(c.missingNos||[]);
-  return Array.from({length:endNo-startNo+1},(_,i)=>startNo+i).filter(n=>!missing.has(n));
+  return Array.from({length:endNo-startNo+1},(_,i)=>startNo+i).filter(n=>{
+    if(missing.has(n))return false;
+    if(c.genderBandsDefined!==true)return true; // 이전 수기 학급은 기존 동작 유지
+    return (c.boysStart!=null&&n>=c.boysStart&&n<=c.boysEnd)||
+           (c.girlsStart!=null&&n>=c.girlsStart&&n<=c.girlsEnd);
+  });
 }
 
 export function genderRangesForClass(c){
+  if(c.genderBandsDefined===true){
+    assertClass(c);
+    return {boysStart:c.boysStart??null,boysEnd:c.boysEnd??null,
+      girlsStart:c.girlsStart??null,girlsEnd:c.girlsEnd??null};
+  }
   const nums=activeNumbers(c);
   const boys=nums.filter(n=>n<=20),girls=nums.filter(n=>n>=21);
   return {
@@ -79,6 +102,8 @@ export function inferClassesFromRoster(items){
   const grouped=new Map();
   for(const st of items){
     if(st.gradeNo!==1)throw Error('현재 웹앱은 1학년 전용입니다.');
+    if(!Number.isInteger(st.number)||st.number<1||st.number>99)
+      throw Error('학생 번호는 1~99번이어야 합니다.');
     if(!grouped.has(st.classNo))grouped.set(st.classNo,[]);
     grouped.get(st.classNo).push(st.number);
   }
@@ -86,13 +111,48 @@ export function inferClassesFromRoster(items){
   return [...grouped.entries()].sort((a,b)=>a[0]-b[0]).map(([classNo,raw])=>{
     const all=[...new Set(raw)].sort((a,b)=>a-b);
     if(all.length!==raw.length)throw Error(String(classNo)+'반 번호 중복이 있습니다.');
-    const startNo=all[0],endNo=all[all.length-1];
-    const exists=new Set(all);
-    const missingNos=Array.from({length:endNo-startNo+1},(_,i)=>startNo+i).filter(n=>!exists.has(n));
-    const c={gradeNo:1,classNo,startNo,endNo,missingNos};
+    const boys=all.filter(n=>n<=20),girls=all.filter(n=>n>=21);
+    const boysStart=boys[0]??null,boysEnd=boys.at(-1)??null;
+    const girlsStart=girls[0]??null,girlsEnd=girls.at(-1)??null;
+    const exists=new Set(all),missingNos=[];
+    for(const [first,last] of [[boysStart,boysEnd],[girlsStart,girlsEnd]]){
+      if(first==null)continue;
+      for(let n=first;n<=last;n++)if(!exists.has(n))missingNos.push(n);
+    }
+    const c={gradeNo:1,classNo,startNo:all[0],endNo:all.at(-1),
+      boysStart,boysEnd,girlsStart,girlsEnd,genderBandsDefined:true,missingNos};
     assertClass(c);
-    return {...c,...genderRangesForClass(c)};
+    if(activeNumbers(c).length!==all.length)throw Error('학급의 남녀 번호 범위 계산에 실패했습니다.');
+    return c;
   });
+}
+
+// 기존 저장 학생 명단과 새 엑셀을 합쳐 학급 범위·결번을 재계산한다.
+// 엑셀에 없는 기존 학생은 유지하며, 이미 등록된 번호의 이름도 자동 덮어쓰지 않는다.
+export function mergeRosterImport(existingRoster,incomingRows,existingSubmissions=[]){
+  if(!Array.isArray(incomingRows)||!incomingRows.length)throw Error('엑셀의 학생 자료가 없습니다.');
+  const map=new Map(existingRoster.map(s=>[s.classNo+'-'+s.number,{...s,gradeNo:1}]));
+  const added=[],conflicts=[],unchanged=[];
+  const affected=new Set();
+  for(const student of incomingRows){
+    const key=student.classNo+'-'+student.number;
+    affected.add(student.classNo);
+    const previous=map.get(key);
+    if(!previous){map.set(key,{...student});added.push({...student});}
+    else if(previous.name!==student.name){
+      conflicts.push({classNo:student.classNo,number:student.number,existingName:previous.name,incomingName:student.name});
+    }else unchanged.push(student);
+  }
+  const all=[...map.values()];
+  const mergedForClasses=all.filter(s=>affected.has(s.classNo));
+  const classes=inferClassesFromRoster(mergedForClasses);
+  // 기존 채점/답안 번호는 새로 계산한 반의 명단에서도 유효해야 한다.
+  for(const sub of existingSubmissions.filter(s=>affected.has(s.classNo))){
+    const group=classes.find(c=>c.classNo===sub.classNo);
+    if(!group||!activeNumbers(group).includes(sub.assignedNo))
+      throw Error(sub.classNo+'반 '+sub.assignedNo+'번은 기존 답안이 있으나 명단에서 확인되지 않습니다. 학생 명단을 먼저 확인하세요.');
+  }
+  return {classes,students:all,added,conflicts,unchanged,affected:[...affected]};
 }
 
 export function rangesForPages(files,startNo,endNo,missingNos=[]){
