@@ -113,7 +113,7 @@ export function renderFlexibleUpload(ctx){
     needsVisual:p.needsVisual,visualChecked:p.visualChecked,manualEdited:p.manualEdited,
     confidence:p.confidence,detected:p.detected,aiRole:p.aiRole||'',
     recognizedNo:p.recognizedNo||'',recognizedName:p.recognizedName||''
-   }))||null,assignByStart:session?.assignByStart||{}};
+   }))||null,assignByStart:session?.assignByStart||{},manualByStart:session?.manualByStart||{}};
  }
  function persistProgress(){
   const snapshot=progressSnapshot();
@@ -155,7 +155,7 @@ export function renderFlexibleUpload(ctx){
      const p={...data,file,edit:resource.edit,view:resource.view,fileName:file.name};
      p.thumb=await thumbnail(p,0.34);pages.push(p);
     }
-    session={pages,groups:null,assignByStart:{...(progress.assignByStart||{})}};
+    session={pages,groups:null,assignByStart:{...(progress.assignByStart||{})},manualByStart:{...(progress.manualByStart||{})}};
    }
    if(ui.page!=='upload'||!el('fuClass'))return;
    el('fuClass').value=selectedClassNo;
@@ -245,11 +245,11 @@ export function renderFlexibleUpload(ctx){
    const active=new Set(targetNumbers());
    const registered=state.roster.filter(x=>x.classNo===cur.classNo&&active.has(x.number)).sort((a,b)=>a.number-b.number);
    const rawGroups=groupPages(session.pages);
-   session.assignByStart??={};
+   session.assignByStart??={};session.manualByStart??={};
    const used=new Set(),duplicates=[],unassigned=[],missing=[];
    const summaries=rawGroups.map((g,i)=>{
     const first=g.pages[0],key=String(session.pages.indexOf(first));
-    if(!session.assignByStart[key]){
+    if(!session.manualByStart[key]){
      const suggested=recognizedStudentNumber(first.recognizedNo,cur.classNo);
      const byName=registered.filter(x=>first.recognizedName&&x.name===first.recognizedName);
      session.assignByStart[key]=active.has(suggested)&&registered.some(x=>x.number===suggested)
@@ -281,6 +281,7 @@ export function renderFlexibleUpload(ctx){
     '<div class="table-wrap"><table class="small-table"><thead><tr><th>순서</th><th>몇 번 학생 자료인가요?</th><th>장수</th><th>정렬된 원본 페이지</th><th>누락된 STEP</th></tr></thead><tbody>'+summaries+'</tbody></table></div>';
    el('fuGroupSummary').querySelectorAll('[data-group-number]').forEach(input=>input.onchange=()=>{
     session.assignByStart[input.dataset.groupNumber]=Number(input.value)||0;
+    session.manualByStart[input.dataset.groupNumber]=true;
     draftConfirmed=false;el('fuConfirm').checked=false;
     persistProgress();checkGroups();
    });
@@ -569,7 +570,7 @@ export function renderFlexibleUpload(ctx){
       pages.push(p);
     }
    }
-   session={pages,groups:null,assignByStart:{}};
+   session={pages,groups:null,assignByStart:{},manualByStart:{}};
    drawPageRows();persistProgress();el('fuAiScan').disabled=false;
    const n=pages.filter(p=>p.needsVisual).length;
    report('PDF '+files.length+'개 · 총 '+pages.length+'쪽의 미리보기를 생성했습니다. AI 이미지 분류 대상 '+n+'쪽.');
