@@ -7,7 +7,7 @@ import {readUploadDraft,storeUploadFiles,storeUploadProgress,clearUploadDraft} f
 
 let session=null;
 let selectedFiles=[],selectedClassNo='',ownerId='',aiServerReady=false;
-let draftConfirmed=false,draftLoaded=false,draftQueue=Promise.resolve();
+let draftConfirmed=false,draftLoaded=false,draftAutoVision=true,draftAutoAi=false,draftQueue=Promise.resolve();
 const el=id=>document.getElementById(id);
 const label=(v)=>String(v??'—');
 const roleOptions=(selected)=>[['unknown','미판별 / 재검토'],...PAGE_ROLES.map(k=>[k,ROLE_NAMES[k]])].map(([key,n])=>'<option value="'+key+'"'+(key===selected?' selected':'')+'>'+esc(n)+'</option>').join('');
@@ -27,7 +27,7 @@ export function renderFlexibleUpload(ctx){
  const userId=ctx.userId||'';
  if(ownerId!==userId){
   session=null;selectedFiles=[];selectedClassNo='';aiServerReady=false;
-  draftConfirmed=false;draftLoaded=false;draftQueue=Promise.resolve();ownerId=userId;
+  draftConfirmed=false;draftLoaded=false;draftAutoVision=true;draftAutoAi=false;draftQueue=Promise.resolve();ownerId=userId;
  }
  if(!state.classes.length){
    main(heading('UPLOAD ANSWERS','PDF 업로드','먼저 학급을 설정하세요.')+'<div class="panel"><button class="btn primary" id="goSettings">학급 설정</button></div>');
@@ -107,7 +107,7 @@ export function renderFlexibleUpload(ctx){
  }
  function progressSnapshot(){
   return {classNo:selectedClassNo,confirmed:draftConfirmed,
-   autoVision:el('fuAutoVision')?.checked??true,autoAi:el('fuAutoAi')?.checked??false,
+   autoVision:draftAutoVision,autoAi:draftAutoAi,
    pages:session?.pages.map(p=>({
     fileIndex:selectedFiles.indexOf(p.file),pageNo:p.pageNo,role:p.role,start:p.start,
     needsVisual:p.needsVisual,visualChecked:p.visualChecked,manualEdited:p.manualEdited,
@@ -139,6 +139,7 @@ export function renderFlexibleUpload(ctx){
    const progress=draft.progress||{};
    selectedClassNo=state.classes.some(c=>String(c.classNo)===String(progress.classNo))?String(progress.classNo):'';
    draftConfirmed=!!progress.confirmed;
+   draftAutoVision=progress.autoVision!==false;draftAutoAi=!!progress.autoAi;
    if(progress.pages?.length){
     const resources=[];
     for(const file of selectedFiles){
@@ -158,8 +159,8 @@ export function renderFlexibleUpload(ctx){
    }
    if(ui.page!=='upload'||!el('fuClass'))return;
    el('fuClass').value=selectedClassNo;
-   el('fuAutoVision').checked=progress.autoVision!==false;
-   el('fuAutoAi').checked=!!progress.autoAi;
+   el('fuAutoVision').checked=draftAutoVision;
+   el('fuAutoAi').checked=draftAutoAi;
    renderFileList();updateExpected();
    if(session){
     drawPageRows(true);el('fuAiScan').disabled=false;
@@ -500,8 +501,8 @@ export function renderFlexibleUpload(ctx){
  }
  el('fuConfirm').onchange=()=>{draftConfirmed=el('fuConfirm').checked;checkGroups();persistProgress();};
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
- el('fuAutoVision').onchange=persistProgress;
- el('fuAutoAi').onchange=persistProgress;
+ el('fuAutoVision').onchange=()=>{draftAutoVision=el('fuAutoVision').checked;persistProgress();};
+ el('fuAutoAi').onchange=()=>{draftAutoAi=el('fuAutoAi').checked;persistProgress();};
  el('fuRetryVisual').onclick=()=>safe(async()=>{
   if(!aiServerReady)throw Error('먼저 상단의 AI 서버 연결 점검을 통과해야 합니다.');
   if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
@@ -605,16 +606,22 @@ export function renderFlexibleUpload(ctx){
   await runVisualClassification(true);
  });
  el('fuUpload').onclick=()=>safe(async()=>{
-  if(!session?.groups||!el('fuConfirm').checked)throw Error('페이지 구분과 확인 체크를 먼저 완료하세요.');
+  if(!session?.groups||!el('fuConfirm').checked)throw Error('각 학생 번호를 확인하고 확인 체크를 완료하세요.');
   const {db,storage,loadAll}=ctx;
-  const cls=Number(el('fuClass').value),start=Number(el('fuStart').value),end=Number(el('fuEnd').value);
-  const groups=groupPages(session.pages,targetNumbers());
+  const cls=Number(el('fuClass').value),groups=session.groups;
+  const studentNos=groups.map(g=>g.number);
+  if(studentNos.some(n=>!targetNumbers().includes(n))||new Set(studentNos).size!==studentNos.length)
+   throw Error('학생 번호가 중복되거나 학급 명단 범위 밖입니다. 확인 후 다시 저장하세요.');
+  const start=Math.min(...studentNos),end=Math.max(...studentNos);
   await loadAll();
   for(const g of groups){
    if(!state.roster.some(r=>r.classNo===cls&&r.number===g.number))throw Error(cls+'반 '+g.number+'번 명단이 없습니다.');
    if(state.submissions.some(r=>r.classNo===cls&&r.assignedNo===g.number))throw Error(cls+'반 '+g.number+'번은 이미 답안이 등록되어 있습니다.');
   }
-  if(!await ask('최종 PDF 업로드','학생 '+groups.length+'명 · 총 '+session.pages.length+'장입니다. 이름 첫 장 기준으로 구분했고, 각 학생 안에서 STEP 순서로 정렬한 PDF를 저장합니다. 맞습니까?','저장'))return;
+  const labels=groups.map(g=>g.number+'번 '+(state.roster.find(st=>st.classNo===cls&&st.number===g.number)?.name||'미등록')).join(', ');
+  if(!await ask('몇 번 학생 자료가 맞습니까?',
+   cls+'반 '+groups.length+'명 · '+session.pages.length+'쪽. 저장할 학생: '+labels+
+   ' · 학생 번호와 첫 장 학번·이름을 확인했습니까? 해당 학생만 저장하며 나머지 반 학생은 변경되지 않습니다.','맞습니다 · PDF 저장'))return;
   el('fuUpload').disabled=true;
   const ids=groups.map(()=>crypto.randomUUID()),batchId=crypto.randomUUID();
   const uploaded=[];
@@ -655,6 +662,12 @@ export function renderFlexibleUpload(ctx){
      try{await ctx.analyzeSubmission(ids[i]);}catch(e){toast('AI 채점 실패: '+e.message,true);break;}
     }
    }
+   // Firebase에 저장을 마친 이후에만 브라우저 임시 PDF를 삭제한다.
+   try{
+    await draftQueue.catch(()=>{});
+    await clearUploadDraft(userId);
+   }catch(e){console.warn('완료된 임시 작업 삭제 실패',e);}
+   selectedFiles=[];session=null;selectedClassNo='';draftConfirmed=false;draftLoaded=true;
    ui.resultsClass=String(cls);await nav('results');
   }catch(e){
    let cleanupFailed=false;
@@ -664,5 +677,29 @@ export function renderFlexibleUpload(ctx){
    throw Error(e.message+(cleanupFailed?' (일부 자료는 남아 있을 수 있으니 채점 현황에서 확인)':' (업로드 취소됨)'));
   }finally{if(el('fuUpload'))el('fuUpload').disabled=false;}
  });
+ el('fuDeleteDraft').onclick=()=>safe(async()=>{
+  if(analysisBusy||visualBusy)throw Error('진행 중인 분석을 먼저 중단하거나 완료하세요.');
+  if(!await ask('임시 업로드 작업 삭제',
+   '이 브라우저에 임시 저장된 PDF 원본·AI 판별 결과·학생 번호 선택을 삭제합니다. 이미 Firebase에 저장된 학생 답안은 삭제하지 않습니다.','임시 자료 삭제'))return;
+  await draftQueue.catch(()=>{});
+  await clearUploadDraft(userId);
+  session=null;selectedFiles=[];selectedClassNo='';draftConfirmed=false;
+  draftAutoVision=true;draftAutoAi=false;draftLoaded=true;
+  el('fuClass').value='';el('fuAutoVision').checked=true;el('fuAutoAi').checked=false;
+  resetReview();renderFileList();updateExpected();
+  el('fuDraftStatus').textContent='이 브라우저의 임시 작업을 삭제했습니다.';
+  report('임시 PDF 파일과 판별 결과를 삭제했습니다. 새로운 작업을 시작할 수 있습니다.');
+ });
+ el('fuAutoVision').checked=draftAutoVision;
+ el('fuAutoAi').checked=draftAutoAi;
  updateExpected();
+ if(session){
+  drawPageRows(true);
+  el('fuAiScan').disabled=false;
+  updateAiProgress(session.pages.every(p=>!p.needsVisual||p.visualChecked)?'done':'idle','기존 AI 판별 작업을 유지했습니다.');
+  report('이전 PDF 작업이 유지되어 있습니다. 페이지·학생 번호를 확인한 후 저장할 수 있습니다.');
+ }else if(selectedFiles.length){
+  report('이전에 선택한 PDF '+selectedFiles.length+'개를 유지했습니다. 장별 분석을 계속 진행할 수 있습니다.');
+ }
+ recoverBrowserDraft();
 }
