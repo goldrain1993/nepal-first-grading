@@ -56,6 +56,12 @@ exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSe
   const numMatches=recognizedNo.replace(/^0+/,'')===String(row.assignedNo),nameMatches=recognizedName.replace(/\s/g,'')===String(expected.data()?.name||'').replace(/\s/g,'');
   const identityStatus=numMatches&&nameMatches?'AI 일치·교사 확인 필요':(recognizedNo&&recognizedName&&confidence!=='낮음'?'AI 불일치':'AI 판독 불확실');
    // 누락/판독불가가 있는 답안을 추측해 점수화하지 않는다. 교사 확정점수는 수정하지 않는다.
+   const commitIfUnfinalized=async fields=>firebaseDb.runTransaction(async tx=>{
+     const latest=await tx.get(sref);
+     if(!latest.exists||latest.data().finalized||latest.data().status!=='ready'||latest.data().pdfPath!==row.pdfPath)
+       throw new HttpsError('failed-precondition','재채점 중 답안이 변경되거나 점수가 확정되었습니다. AI 결과를 저장하지 않았습니다.');
+     tx.update(sref,fields);
+   });
    const auditFields={aiChecks:checks,aiReviewReasons:reviewReasons,
      aiSummary:clean(result.summary,2500),
      aiUncertain:Array.isArray(result.uncertain_fields)?result.uncertain_fields.slice(0,12).map(v=>clean(v,200)):[],
@@ -63,10 +69,10 @@ exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSe
      identityStatus:row.identityConfirmed?'교사 확인':identityStatus,
      testValueChecks:testChecks,aiError:'',updatedAt:admin.firestore.FieldValue.serverTimestamp()};
    if(reviewReasons.length){
-     await sref.update({...auditFields,aiCandidateGrade:grades,aiStatus:'교사 확인 필요'});
+     await commitIfUnfinalized({...auditFields,aiCandidateGrade:grades,aiStatus:'교사 확인 필요'});
      return {ok:true,gradingVersion:2,reviewRequired:true,reviewReasons,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches}};
    }
-   await sref.update({...auditFields,aiGrade:grades,aiCandidateGrade:null,aiStatus:'AI 완료'});
+   await commitIfUnfinalized({...auditFields,aiGrade:grades,aiCandidateGrade:null,aiStatus:'AI 완료'});
    return {ok:true,gradingVersion:2,reviewRequired:false,identity:{number:recognizedNo,name:recognizedName,confidence,match:numMatches&&nameMatches},grades};
 });
 
