@@ -1,7 +1,7 @@
 import {doc,writeBatch,updateDoc,deleteDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
 import {ref,uploadBytes,deleteObject} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-storage.js';
 import {httpsCallable} from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-functions.js';
-import {activeNumbers,escapeHtml as esc} from './core.mjs';
+import {activeNumbers,escapeHtml as esc} from './core.mjs?v=2';
 import {PAGE_ROLES,ROLE_NAMES,inferPageRole,applyVisualPageResult,groupPages,recognizedStudentNumber} from './page-grouping.mjs?v=4';
 import {readUploadDraft,storeUploadFiles,storeUploadProgress,clearUploadDraft} from './upload-draft.mjs';
 
