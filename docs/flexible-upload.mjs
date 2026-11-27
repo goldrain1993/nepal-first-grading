@@ -249,7 +249,7 @@ export function renderFlexibleUpload(ctx){
    const used=new Set(),duplicates=[],unassigned=[],missing=[];
    const summaries=rawGroups.map((g,i)=>{
     const first=g.pages[0],key=String(session.pages.indexOf(first));
-    if(!Object.hasOwn(session.assignByStart,key)){
+    if(!session.assignByStart[key]){
      const suggested=recognizedStudentNumber(first.recognizedNo,cur.classNo);
      const byName=registered.filter(x=>first.recognizedName&&x.name===first.recognizedName);
      session.assignByStart[key]=active.has(suggested)&&registered.some(x=>x.number===suggested)
