@@ -29,10 +29,12 @@ jobs:
           node --check functions/test-rules.js
           node --check functions/grading-validation.js
           node --check docs/ai-grading-batch.mjs
+          node --check docs/teacher-review-choices.mjs
       - name: AI evidence and selected-student grading tests
         run: |
           node tests/grading-validation.cjs
           node tests/ai-grading-batch.mjs
+          node tests/teacher-review-choices.mjs
       - name: Excel roster and PDF assignment tests
         run: node tests/smoke.mjs
       - name: Variable pages and grading rules
