@@ -56,12 +56,26 @@ export function groupPages(pages,studentNumbers){
   if(group.length>5)throw Error('학생 한 명에게 6장 이상 배정됐습니다. 새 학생의 첫 장 위치를 확인하세요.');
  }
  if(group.length)students.push(group);
- if(students.length!==studentNumbers.length)throw Error('PDF에서 분리한 학생 '+students.length+'명과 선택한 학생 '+studentNumbers.length+'명이 다릅니다. 첫 장과 번호 범위를 대조하세요.');
+ if(studentNumbers!==undefined&&students.length!==studentNumbers.length)throw Error('PDF에서 분리한 학생 '+students.length+'명과 선택한 학생 '+studentNumbers.length+'명이 다릅니다. 첫 장과 번호 범위를 대조하세요.');
  return students.map((parts,i)=>{
    if(parts[0].role!=='front')throw Error((i+1)+'번째 학생의 첫 장은 이름·학번이 있는 STEP 1이어야 합니다.');
    const used=new Set();
    for(const p of parts){if(used.has(p.role))throw Error((i+1)+'번째 학생에게 "'+ROLE_NAMES[p.role]+'" 페이지가 중복됩니다. STEP 선택과 시작 위치를 수정하세요.');used.add(p.role);}
    const sorted=[...parts].sort((a,b)=>PAGE_ROLES.indexOf(a.role)-PAGE_ROLES.indexOf(b.role));
-   return {number:studentNumbers[i],pages:sorted,sourcePages:parts.length,missingRoles:PAGE_ROLES.filter(role=>!used.has(role))};
+   return {number:studentNumbers?.[i]??null,pages:sorted,sourcePages:parts.length,missingRoles:PAGE_ROLES.filter(role=>!used.has(role))};
  });
+}
+
+// 첫 장에서 AI가 읽은 학번을 반·번호로 해석한다. 맞는 학급이 아니면 자동 선택하지 않는다.
+// 예: 10135 = 1학년 1반 35번, 26-10135 = 해당 연도 1학년 1반 35번.
+export function recognizedStudentNumber(text,classNo){
+ const raw=String(text??'').trim().replace(/[\s-]/g,'');
+ if(!/^\d+$/.test(raw))return null;
+ if(/^\d{1,2}$/.test(raw)){
+  const n=Number(raw);return n>=1&&n<=99?n:null;
+ }
+ const id=raw.length===7?raw.slice(2):raw;
+ if(!/^\d{5}$/.test(id))return null;
+ const grade=Number(id.slice(0,1)),room=Number(id.slice(1,3)),student=Number(id.slice(3,5));
+ return grade===1&&room===Number(classNo)&&student>=1&&student<=99?student:null;
 }
