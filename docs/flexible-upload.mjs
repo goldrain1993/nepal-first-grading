@@ -214,54 +214,77 @@ export function renderFlexibleUpload(ctx){
   if(visualBusy)throw Error('AI 페이지 판별이 이미 진행 중입니다.');
   const candidates=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
   if(!candidates.length){
-   report('이미 판별된 STEP은 유지했습니다. 재검토할 페이지가 없습니다. 분류를 직접 수정할 수 있습니다.');
+   report('AI로 분류할 페이지가 없습니다. 이미 STEP이 선택되어 있습니다.');
+   updateAiProgress('done');
    return;
   }
-  const hadAnalysisLock=analysisBusy;
+  const wasAnalyzing=analysisBusy,scanBtn=el('fuAiScan'),stopBtn=el('fuStopAi');
   visualBusy=true;visualCancel=false;analysisBusy=true;
-  const scanBtn=el('fuAiScan'),stopBtn=el('fuStopAi');
+  el('fuConfirm').checked=false;
   if(scanBtn)scanBtn.disabled=true;
   if(stopBtn){stopBtn.hidden=false;stopBtn.disabled=false;}
   for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
-    const field=el(id);if(field)field.disabled=true;
+   const field=el(id);if(field)field.disabled=true;
   }
-  let analyzed=0,high=0,medium=0,unresolved=0;
+  let processed=0,high=0,medium=0,unresolved=0;
+  updateAiProgress('running','요청한 '+candidates.length+'쪽을 순차 처리합니다.');
   try{
    const callable=httpsCallable(ctx.functions,'inspectPages',{timeout:120000});
-   for(let offset=0;offset<candidates.length;offset+=6){
+   const batchSize=4; // 155쪽처럼 많은 스캔도 한 번에 4쪽씩 보내 timeout/요청량을 줄인다.
+   for(let offset=0;offset<candidates.length;offset+=batchSize){
     if(visualCancel)break;
-    const chunk=candidates.slice(offset,offset+6);
-    report('AI가 스캔 이미지의 STEP·문항·학번 칸을 판별 중: '+(offset+1)+'~'+(offset+chunk.length)+'/'+candidates.length+'쪽');
+    const chunk=candidates.slice(offset,offset+batchSize);
+    const batchNumber=Math.floor(offset/batchSize)+1,totalBatches=Math.ceil(candidates.length/batchSize);
+    const progress='AI 스캔 STEP 자동 판별 '+batchNumber+'/'+totalBatches+'회차 · '+processed+'/'+candidates.length+'쪽 완료';
+    report(progress);
+    updateAiProgress('running',progress);
     const images=[];
-    for(const p of chunk)images.push(await thumbnail(p,1.5));
-    const response=await callable({images});
-    const results=response.data?.pages;
-    if(!Array.isArray(results)||results.length!==chunk.length)throw Error('AI의 페이지별 판별 결과 수가 맞지 않습니다.');
+    for(const p of chunk)images.push(await thumbnail(p,1.35));
+    let results;
+    try{
+     const response=await callable({images});
+     results=response.data?.pages;
+     if(!Array.isArray(results)||results.length!==chunk.length)
+      throw Error('AI가 응답한 페이지 수가 일치하지 않습니다. '+chunk.length+'쪽을 재분석해야 합니다.');
+    }catch(e){
+     // 한 묶음 실패 시 이미 성공한 이전 묶음을 유지한다. 인증/한도 오류를 반복 호출하지 않는다.
+     const msg=friendlyAiError(e);
+     const failedPositions=chunk.map(p=>p.fileName+' '+p.pageNo+'쪽').join(', ');
+     throw Error('AI 자동 판별이 '+processed+'/'+candidates.length+'쪽에서 중단됐습니다. '
+      +'실패한 원본: '+failedPositions+' · '+msg
+      +' · 완료된 STEP은 유지됐습니다. [남은 미판별 페이지 AI 분석 계속]을 누르면 미분석 페이지만 다시 요청합니다.');
+    }
     for(let i=0;i<chunk.length;i++){
-      const p=chunk[i],success=applyVisualPageResult(p,results[i]);
-      analyzed++;
-      if(success){if(p.confidence==='높음')high++;else medium++;}
-      else unresolved++;
+     const p=chunk[i],success=applyVisualPageResult(p,results[i]);
+     processed++;
+     if(success){if(p.confidence==='높음')high++;else medium++;}
+     else unresolved++;
     }
     drawPageRows();
-    report('AI 이미지 분석 '+analyzed+'/'+candidates.length+'쪽 · 높음 '+high+' · 보통 '+medium+' · 판별 필요 '+unresolved+
-     (candidates.length>analyzed?' · 나머지 분석 중':''));
+    const status='진행 '+processed+'/'+candidates.length+'쪽 · AI 높음 '+high
+      +' · 보통 '+medium+' · 불확실 '+unresolved;
+    report(status);
+    updateAiProgress('running',status);
    }
-   report((visualCancel?'AI 분석 중단':'AI 페이지 자동 판별 완료')+
-    ' · '+analyzed+'/'+candidates.length+'쪽 · 확실 '+high+'쪽 / 확인 권장 '+medium+'쪽 / 판별 필요 '+unresolved+'쪽.'+
-    ' 학번·이름 및 학생별 페이지 구분은 저장 전 확인하세요.');
-  }catch(error){
-   report('AI 페이지 판별 중 오류: '+(error?.message||String(error))+
-    ' · 성공한 페이지는 유지했습니다. [AI로 미판별 페이지 다시 분석]으로 재시도할 수 있습니다.');
-   throw error;
+   const finishedMessage=(visualCancel?'AI 분석 중단':'AI 이미지 자동 판별 완료')
+      +' · '+processed+'/'+candidates.length+'쪽 처리 · AI 높음 '+high+' / 보통 '+medium
+      +' / 판별 불확실 '+unresolved+'쪽. 학생별 첫 장의 이름·학번은 저장 전에 확인하세요.';
+   report(finishedMessage);
+   updateAiProgress(visualCancel?'cancel':'done',finishedMessage);
+  }catch(e){
+   const info=friendlyAiError(e);
+   report('AI 분석 실패: '+info);
+   updateAiProgress('error',info);
+   throw e;
   }finally{
    visualBusy=false;
-   if(!hadAnalysisLock)analysisBusy=false;
+   if(!wasAnalyzing)analysisBusy=false;
    if(stopBtn){stopBtn.hidden=true;stopBtn.disabled=true;}
    if(scanBtn)scanBtn.disabled=!session;
    for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
     const field=el(id);if(field)field.disabled=analysisBusy;
    }
+   updateAiProgress(visualCancel?'cancel':'idle');
   }
  }
  function drawPageRows(){
