@@ -31,7 +31,10 @@ exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSe
   const sref=firebaseDb.doc(`submissions/${submissionId}`),snap=await sref.get();
   if(!snap.exists||snap.data().status!=='ready'||snap.data().finalized)throw new HttpsError('failed-precondition','준비된 미확정 답안만 분석할 수 있습니다.');
   if(!Array.isArray(images)||(images.length<1||images.length>5)||images.some(v=>typeof v!=='string'||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v)||v.length>1600000)||images.reduce((a,v)=>a+v.length,0)>7500000)throw new HttpsError('invalid-argument','이미지 1~5쪽이 필요하며 총 전송 크기는 7.5MB 이하입니다.');
-  const file=admin.storage().bucket().file(snap.data().pdfPath);
+  const storedPages=Number(snap.data().pageCount);
+   if(Number.isInteger(storedPages)&&storedPages>=1&&storedPages<=5&&images.length!==storedPages)
+     throw new HttpsError('invalid-argument','저장된 PDF 쪽수와 채점 이미지 수가 다릅니다. 페이지가 누락됐는지 확인하세요.');
+   const file=admin.storage().bucket().file(snap.data().pdfPath);
   const [exists]=await file.exists();if(!exists)throw new HttpsError('failed-precondition','학생 PDF 파일이 없습니다.');
   const secret=OPENAI_API_KEY.value();if(!secret)throw new HttpsError('failed-precondition','OPENAI_API_KEY 비밀키가 설정되지 않았습니다.');
   const content=[{type:'text',text:PROMPT}];images.forEach((src,i)=>{content.push({type:'text',text:`답안 ${i+1}/${images.length}쪽`},{type:'image_url',image_url:{url:src,detail:'high'}})});
@@ -51,6 +54,8 @@ exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSe
     const sensor=clean(e.sensor,50),value=clean(e.value,100),check=testValueCheck(value,sensor,assignedTestNo);
     return {sensor,value,valid:check.valid,reason:check.reason,basis:check.basis};
   }):[];
+  if(testChecks.some(c=>!c.valid)&&checks.algorithm.test.status==='충족')
+    reviewReasons.push('STEP 4 TEST 값의 공식 데이터 검증 결과와 AI의 충족 판정이 불일치하여 교사 확인이 필요합니다.');
   const id=result.identity||{},recognizedNo=clean(id.number,50).trim(),recognizedName=clean(id.name,80).trim(),confidence=['높음','보통','낮음'].includes(id.confidence)?id.confidence:'낮음';
   const row=snap.data(),expected=await firebaseDb.doc(`roster/${row.classNo}-${row.assignedNo}`).get();
   const numMatches=recognizedNo.replace(/^0+/,'')===String(row.assignedNo),nameMatches=recognizedName.replace(/\s/g,'')===String(expected.data()?.name||'').replace(/\s/g,'');
