@@ -6,7 +6,7 @@ import {getFunctions,httpsCallable} from 'https://www.gstatic.com/firebasejs/13.
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 import {firebaseConfig} from './firebase-config.js';
 import {readSchoolExcel,downloadSchoolExcelTemplate} from './roster-excel.mjs';
-import {renderFlexibleUpload} from './flexible-upload.mjs?v=7';
+import {renderFlexibleUpload} from './flexible-upload.mjs?v=8';
 import {AREA_KEYS,LEVELS,DEFAULT_RUBRIC,escapeHtml as esc,score,verifyRubric,assertClass,activeNumbers,parseMissingNumbers,genderRangesForClass,rangesForPages,parseCsv,toCsv} from './core.mjs';
 
 const $=id=>document.getElementById(id);
