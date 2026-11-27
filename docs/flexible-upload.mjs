@@ -209,12 +209,15 @@ export function renderFlexibleUpload(ctx){
    row.hidden=!!only&&p.role!=='unknown'&&p.confidence!=='보통'&&p.confidence!=='낮음';
   });
  }
- async function runVisualClassification(){
+ async function runVisualClassification(retryUncertain=false){
   if(!session)throw Error('먼저 PDF 장별 분석을 완료하세요.');
   if(visualBusy)throw Error('AI 페이지 판별이 이미 진행 중입니다.');
-  const candidates=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
+  // 성공·실패를 막론하고 이전에 AI 응답을 받은 페이지는 재호출하지 않는다.
+  // 다만 교사가 명시적으로 재판별을 요청했고 미처리 페이지가 없을 때만 낮은 신뢰도를 재분석한다.
+  const pending=session.pages.filter(p=>!p.manualEdited&&p.needsVisual&&!p.visualChecked);
+  const candidates=pending.length?pending:retryUncertain?session.pages.filter(p=>!p.manualEdited&&p.visualChecked&&p.role==='unknown'):[];
   if(!candidates.length){
-   report('AI로 분류할 페이지가 없습니다. 이미 STEP이 선택되어 있습니다.');
+   report('미처리 페이지가 없습니다. AI 결과가 불확실하면 직접 재판별 버튼을 누르세요.');
    updateAiProgress('done');
    return;
   }
@@ -331,12 +334,13 @@ export function renderFlexibleUpload(ctx){
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
  el('fuRetryVisual').onclick=()=>safe(async()=>{
   if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
-  const n=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked))).length;
+  const pendingCount=session.pages.filter(p=>!p.manualEdited&&p.needsVisual&&!p.visualChecked).length;
+  const n=pendingCount||session.pages.filter(p=>!p.manualEdited&&p.visualChecked&&p.role==='unknown').length;
   if(!n){report('추가 AI 분류가 필요한 페이지가 없습니다.');return;}
   if(!await ask('남은 페이지 AI 자동 판별',
    '미판별·불확실 '+n+'쪽의 이미지를 외부 OpenAI API로 전송합니다. 개인정보 외부 전송·API 비용 발생을 확인하고 허용합니까?',
    '동의하고 남은 페이지 판별'))return;
-  await runVisualClassification();
+  await runVisualClassification(true);
  });
  el('fuStopAi').onclick=()=>{visualCancel=true;report('현재 AI 요청이 끝나면 나머지 페이지 판별을 중단합니다.');};
  el('fuInspect').onclick=()=>safe(async()=>{
@@ -393,12 +397,13 @@ export function renderFlexibleUpload(ctx){
  });
  el('fuAiScan').onclick=()=>safe(async()=>{
   if(!session)throw Error('PDF 장별 분석부터 실행하세요.');
-  const n=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked))).length;
+  const pendingCount=session.pages.filter(p=>!p.manualEdited&&p.needsVisual&&!p.visualChecked).length;
+  const n=pendingCount||session.pages.filter(p=>!p.manualEdited&&p.visualChecked&&p.role==='unknown').length;
   if(!n){report('AI가 판독할 미확인 페이지가 없습니다. 보통/낮음 결과를 재검토하려면 해당 STEP을 직접 확인해 주세요.');return;}
   if(!await ask('AI 스캔 페이지 판별',
     '확인되지 않은 '+n+'쪽의 이미지(학번·이름·필기 포함)가 외부 OpenAI API로 전송되며 비용이 발생할 수 있습니다. 학교 개인정보·보안 지침에 따라 이용이 허용되는지 확인했습니까?',
     '동의하고 AI 판별'))return;
-  await runVisualClassification();
+  await runVisualClassification(true);
  });
  el('fuUpload').onclick=()=>safe(async()=>{
   if(!session?.groups||!el('fuConfirm').checked)throw Error('페이지 구분과 확인 체크를 먼저 완료하세요.');
