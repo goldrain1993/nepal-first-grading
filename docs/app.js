@@ -449,7 +449,7 @@ async function analyzeSubmission(sid,opts={}){
   await loadAll();
    return {reviewRequired:!!response.data?.reviewRequired};
  }catch(e){
-  const detail=String(e?.message||e).slice(0,240);
+  const detail=e?.code==='functions/not-found'?'새 AI 채점 함수 gradeAnswerV2가 아직 Firebase에 배포되지 않았습니다. 먼저 서버 함수를 배포해야 합니다.':String(e?.message||e).slice(0,240);
   await updateDoc(doc(db,'submissions',sid),{aiStatus:'AI 오류',aiError:detail,updatedAt:serverTimestamp()});
   throw Error('AI 채점 실패: '+detail+'. 기존 AI 제안과 교사 저장 점수는 유지했습니다.');
  }
