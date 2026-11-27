@@ -191,9 +191,19 @@ export function renderFlexibleUpload(ctx){
   detail.textContent=(message?message+' · ':'')+'AI 확실 '+high+'쪽 / AI 확인 권장 '+medium+'쪽 / AI 판별 불확실 '+uncertain+'쪽 / 아직 AI 미분석 '+pending+'쪽';
   if(retry)retry.disabled=analysisBusy||visualBusy||!pages.some(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
  }
+ function isLikelyTransient503(error){
+  const code=String(error?.code||'').toLowerCase();
+  const message=String(error?.message||'').trim().toLowerCase();
+  // A callable request rejected before the handler can surface as Firebase "internal [0]".
+  // Do NOT retry explicit validation, authorization or OpenAI quota errors.
+  if(/permission-denied|unauthenticated|invalid-argument|resource-exhausted|failed-precondition|deadline-exceeded/.test(code))return false;
+  return /\\b503\\b/.test(message) || code.includes('functions/unavailable') ||
+   (code.includes('functions/internal') && /^internal(?:\\s*\\[0\\])?$/.test(message));
+ }
  function friendlyAiError(error){
   const raw=String(error?.message||error||'');
   const code=String(error?.code||'');
+  if(isLikelyTransient503(error))return 'Firebase AI 함수 서버가 일시적으로 요청을 처리하지 못했습니다(503/내부 오류). 잠시 후 미분석 페이지만 다시 분석하세요. 반복되면 Cloud Run 오류 로그를 확인해야 합니다.';
   if(/401|API 키|failed-precondition/.test(raw))return 'API 키가 유효하지 않거나 서버 설정이 필요합니다. Cloud Shell의 Firebase 함수 상태를 확인하세요.';
   if(/429|resource-exhausted|quota/i.test(raw+' '+code))return 'OpenAI 호출 한도나 크레딧 부족으로 중단되었습니다. 결제/사용 한도를 확인한 후 남은 페이지를 다시 분석하세요.';
   if(/deadline|timeout|시간 초과/i.test(raw+' '+code))return 'AI 응답 시간이 초과됐습니다. 완료된 페이지는 유지됩니다. 남은 페이지를 다시 분석하세요.';
@@ -245,7 +255,19 @@ export function renderFlexibleUpload(ctx){
     for(const p of chunk)images.push(await thumbnail(p,1.35));
     let results;
     try{
-     const response=await callable({images});
+     let response;
+     try{
+      response=await callable({images});
+     }catch(firstError){
+      if(!isLikelyTransient503(firstError)||visualCancel)throw firstError;
+      // One bounded retry for transient Cloud Run 503; never retry policy/auth/quota errors.
+      // If the prior response was lost after AI processing, another call can incur costs.
+      report('Cloud Run AI 서버 일시 오류(503 가능): '+batchNumber+'/'+totalBatches+'회차를 한 번만 재시도합니다.');
+      updateAiProgress('running','첫 호출 실패 · 2초 후 서버 재시도 1회');
+      await new Promise(resolve=>setTimeout(resolve,2000));
+      if(visualCancel)throw Error('교사 요청에 따라 AI 자동 분석을 중단했습니다.');
+      response=await callable({images});
+     }
      results=response.data?.pages;
      if(!Array.isArray(results)||results.length!==chunk.length)
       throw Error('AI가 응답한 페이지 수가 일치하지 않습니다. '+chunk.length+'쪽을 재분석해야 합니다.');
