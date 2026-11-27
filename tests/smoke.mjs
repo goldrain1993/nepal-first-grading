@@ -37,7 +37,8 @@ const excelStudents=parseXlsxRosterRows(excelRows);
 assert.equal(excelStudents.length,6);
 const inferred=inferClassesFromRoster(excelStudents);
 assert.deepEqual(inferred.map(x=>x.classNo),[1,2]);
-assert.deepEqual(inferred[0].missingNos,[2,...Array.from({length:17},(_,i)=>4+i),22]);
+// 남/여 사이 사용하지 않는 번호대는 결번이 아니라 범위 밖이므로 제외한다.
+assert.deepEqual(inferred[0].missingNos,[2,22]);
 assert.deepEqual([inferred[0].boysStart,inferred[0].boysEnd,inferred[0].girlsStart,inferred[0].girlsEnd],[1,3,21,23]);
 assert.equal(activeNumbers(inferred[0]).length,4);
 assert.deepEqual([inferred[1].boysStart,inferred[1].boysEnd,inferred[1].girlsStart,inferred[1].girlsEnd],[null,null,21,22]);
