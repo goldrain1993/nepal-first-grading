@@ -95,6 +95,82 @@ export function renderFlexibleUpload(ctx){
   el('fuUpload').disabled=true;
   el('fuConfirm').checked=false;
  };
+
+ // Browser-local teacher draft: original files once, results separately (no server upload yet).
+ function enqueueDraft(work){
+  if(!userId)return;
+  draftQueue=draftQueue.catch(()=>{}).then(work);
+  draftQueue.catch(e=>{
+   console.warn('임시 PDF 저장 실패',e);
+   if(el('fuDraftStatus'))el('fuDraftStatus').textContent='임시 저장 실패: 브라우저 저장 공간·권한을 확인하세요. 현재 탭에서 메뉴 이동 시에는 유지됩니다.';
+  });
+ }
+ function progressSnapshot(){
+  return {classNo:selectedClassNo,confirmed:draftConfirmed,
+   autoVision:el('fuAutoVision')?.checked??true,autoAi:el('fuAutoAi')?.checked??false,
+   pages:session?.pages.map(p=>({
+    fileIndex:selectedFiles.indexOf(p.file),pageNo:p.pageNo,role:p.role,start:p.start,
+    needsVisual:p.needsVisual,visualChecked:p.visualChecked,manualEdited:p.manualEdited,
+    confidence:p.confidence,detected:p.detected,aiRole:p.aiRole||'',
+    recognizedNo:p.recognizedNo||'',recognizedName:p.recognizedName||''
+   }))||null,assignByStart:session?.assignByStart||{}};
+ }
+ function persistProgress(){
+  const snapshot=progressSnapshot();
+  enqueueDraft(()=>storeUploadProgress(userId,snapshot));
+ }
+ function persistFiles(){
+  const files=[...selectedFiles],snapshot=progressSnapshot();
+  enqueueDraft(async()=>{await storeUploadFiles(userId,files);await storeUploadProgress(userId,snapshot);});
+ }
+ async function recoverBrowserDraft(){
+  if(!userId||draftLoaded)return;
+  draftLoaded=true;
+  const originalClass=selectedClassNo;
+  if(el('fuDraftStatus'))el('fuDraftStatus').textContent='이전에 임시 저장한 PDF 작업을 확인하는 중입니다…';
+  try{
+   const draft=await readUploadDraft(userId);
+   if(selectedFiles.length||session||selectedClassNo!==originalClass)return;
+   if(!draft.files.length){
+    if(el('fuDraftStatus'))el('fuDraftStatus').textContent='선택한 PDF와 판별 결과는 이 브라우저에 임시 저장됩니다. 공용 PC에서는 작업 완료 후 삭제하세요.';
+    return;
+   }
+   selectedFiles=draft.files;
+   const progress=draft.progress||{};
+   selectedClassNo=state.classes.some(c=>String(c.classNo)===String(progress.classNo))?String(progress.classNo):'';
+   draftConfirmed=!!progress.confirmed;
+   if(progress.pages?.length){
+    const resources=[];
+    for(const file of selectedFiles){
+     const bytes=new Uint8Array(await file.arrayBuffer());
+     const edit=await window.PDFLib.PDFDocument.load(bytes.slice());
+     const view=await ctx.pdfjsLib.getDocument({data:bytes.slice()}).promise;
+     resources.push({edit,view});
+    }
+    const pages=[];
+    for(const data of progress.pages){
+     const i=Number(data.fileIndex),file=selectedFiles[i],resource=resources[i];
+     if(!file||!resource||data.pageNo<1||data.pageNo>resource.view.numPages)throw Error('저장된 PDF 원본과 페이지 정보가 일치하지 않습니다.');
+     const p={...data,file,edit:resource.edit,view:resource.view,fileName:file.name};
+     p.thumb=await thumbnail(p,0.34);pages.push(p);
+    }
+    session={pages,groups:null,assignByStart:{...(progress.assignByStart||{})}};
+   }
+   if(ui.page!=='upload'||!el('fuClass'))return;
+   el('fuClass').value=selectedClassNo;
+   el('fuAutoVision').checked=progress.autoVision!==false;
+   el('fuAutoAi').checked=!!progress.autoAi;
+   renderFileList();updateExpected();
+   if(session){
+    drawPageRows(true);el('fuAiScan').disabled=false;
+    updateAiProgress(session.pages.every(p=>!p.needsVisual||p.visualChecked)?'done':'idle','이전에 판별한 결과를 복원했습니다.');
+   }
+   if(el('fuDraftStatus'))el('fuDraftStatus').textContent='✓ 이전 작업 복원: PDF '+selectedFiles.length+'개'+(session?' · AI 판별 '+session.pages.filter(p=>p.visualChecked).length+'/'+session.pages.length+'쪽':'')+'.';
+  }catch(e){
+   console.error('PDF 임시 작업 복원 실패',e);
+   if(el('fuDraftStatus'))el('fuDraftStatus').textContent='이전 작업 복원 실패: '+e.message+' · 임시 자료를 삭제한 후 다시 선택할 수 있습니다.';
+  }
+ }
  function renderFileList(){
   const list=el('fuFileList'),total=selectedFiles.reduce((n,f)=>n+f.size,0);
   if(!selectedFiles.length){
@@ -107,7 +183,7 @@ export function renderFlexibleUpload(ctx){
       '<button type="button" class="btn secondary" data-fu-action="down" data-fu-index="'+i+'" '+(i===selectedFiles.length-1?'disabled':'')+' aria-label="'+(i+1)+'번째 파일 아래로">↓</button>'+
       '<button type="button" class="btn secondary" data-fu-action="remove" data-fu-index="'+i+'" aria-label="'+(i+1)+'번째 파일 삭제">삭제</button></div></li>'
      ).join('')+'</ol><button type="button" class="btn secondary pdf-clear-button" id="fuClearFiles">전체 파일 목록 비우기</button>';
-   el('fuClearFiles').onclick=()=>{if(analysisBusy)return;selectedFiles=[];resetReview();renderFileList();report('선택한 파일을 모두 제거했습니다.');};
+   el('fuClearFiles').onclick=()=>{if(analysisBusy)return;selectedFiles=[];resetReview();renderFileList();persistFiles();report('선택한 파일을 모두 제거했습니다.');};
   }
  }
  function addFiles(fileList){
@@ -126,7 +202,7 @@ export function renderFlexibleUpload(ctx){
   const total=next.reduce((n,f)=>n+f.size,0);
   if(total>200*1024*1024)throw Error('여러 PDF의 총 크기는 200MB 이하로 나눠서 분석하세요.');
   selectedFiles=next;
-  resetReview();renderFileList();
+  resetReview();renderFileList();persistFiles();
   report('PDF '+selectedFiles.length+'개를 추가했습니다.'+(duplicates?' 중복 '+duplicates+'개 제외.':'')+' 목록 순서대로 분석합니다. 아직 서버에 업로드하지 않았습니다.');
  }
  const picker=el('fuFiles'),dropzone=el('fuDropzone');
@@ -152,7 +228,7 @@ export function renderFlexibleUpload(ctx){
   else if(action==='up'&&i>0)[selectedFiles[i-1],selectedFiles[i]]=[selectedFiles[i],selectedFiles[i-1]];
   else if(action==='down'&&i<selectedFiles.length-1)[selectedFiles[i+1],selectedFiles[i]]=[selectedFiles[i],selectedFiles[i+1]];
   else return;
-  resetReview();renderFileList();report('파일 목록을 변경했습니다. 변경된 순서대로 다시 분석하세요.');
+  resetReview();renderFileList();persistFiles();report('파일 목록을 변경했습니다. 변경된 순서대로 다시 분석하세요.');
  };
  renderFileList();
  function targetNumbers(){
@@ -284,7 +360,7 @@ export function renderFlexibleUpload(ctx){
   el('fuConfirm').checked=false;
   if(scanBtn)scanBtn.disabled=true;
   if(stopBtn){stopBtn.hidden=false;stopBtn.disabled=false;}
-  for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
+  for(const id of ['fuInspect','fuFiles','fuClass']){
    const field=el(id);if(field)field.disabled=true;
   }
   let processed=0,high=0,medium=0,unresolved=0,finalPhase='idle',finalMessage='';
@@ -354,7 +430,7 @@ export function renderFlexibleUpload(ctx){
      if(success){if(p.confidence==='높음')high++;else medium++;}
      else unresolved++;
     }
-    drawPageRows();
+    drawPageRows();persistProgress();
     const status='진행 '+processed+'/'+candidates.length+'쪽 · AI 높음 '+high
       +' · 보통 '+medium+' · 불확실 '+unresolved;
     report(status);
@@ -364,12 +440,12 @@ export function renderFlexibleUpload(ctx){
       +' · '+processed+'/'+candidates.length+'쪽 처리 · AI 높음 '+high+' / 보통 '+medium
       +' / 판별 불확실 '+unresolved+'쪽. 학생별 첫 장의 이름·학번은 저장 전에 확인하세요.';
    finalPhase=visualCancel?'cancel':'done';finalMessage=finishedMessage;
-   report(finishedMessage);
+   persistProgress();report(finishedMessage);
    updateAiProgress(finalPhase,finishedMessage);
   }catch(e){
    const info=friendlyAiError(e);
    finalPhase='error';finalMessage=info;
-   report('AI 분석 실패: '+info);
+   persistProgress();report('AI 분석 실패: '+info);
    updateAiProgress('error',info);
    throw e;
   }finally{
@@ -377,16 +453,17 @@ export function renderFlexibleUpload(ctx){
    if(!wasAnalyzing)analysisBusy=false;
    if(stopBtn){stopBtn.hidden=true;stopBtn.disabled=true;}
    if(scanBtn)scanBtn.disabled=!session;
-   for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
+   for(const id of ['fuInspect','fuFiles','fuClass']){
     const field=el(id);if(field)field.disabled=analysisBusy;
    }
    updateAiProgress(finalPhase,finalMessage);
   }
  }
- function drawPageRows(){
-  if(!session)return;
+ function drawPageRows(preserveConfirmed=false){
+  if(!session||!el('fuReview'))return;
   el('fuReview').hidden=false;
-  el('fuConfirm').checked=false;
+  if(!preserveConfirmed)draftConfirmed=false;
+  el('fuConfirm').checked=draftConfirmed;
   el('fuPageRows').innerHTML=session.pages.map((p,i)=>
    '<tr data-page-index="'+i+'" class="'+(p.confidence==='높음'?'page-ai-high':p.confidence==='보통'?'page-ai-medium':p.visualChecked&&p.role==='unknown'?'page-ai-unknown':p.role==='unknown'?'page-ai-waiting':'')+'"><td><strong>'+(i+1)+'</strong><small>'+esc(p.fileName)+' · '+p.pageNo+'쪽</small></td>'+
    '<td><img class="scan-thumb" data-preview="'+i+'" src="'+p.thumb+'" alt="PDF '+(i+1)+'쪽 미리보기" title="클릭하여 확대"></td>'+
@@ -397,12 +474,12 @@ export function renderFlexibleUpload(ctx){
    const p=session.pages[Number(input.dataset.start)];p.start=input.checked;
    if(p.start)p.role='front';else if(p.role==='front')p.role='unknown';
    p.manualEdited=true;p.detected='교사가 직접 페이지 시작을 수정함';p.confidence='교사';
-   el('fuConfirm').checked=false;drawPageRows();
+   el('fuConfirm').checked=false;drawPageRows();persistProgress();
   });
   el('fuPageRows').querySelectorAll('[data-role]').forEach(input=>input.onchange=()=>{
    const p=session.pages[Number(input.dataset.role)];p.role=input.value;p.start=p.role==='front';
    p.manualEdited=true;p.detected='교사가 직접 STEP을 지정함';p.confidence='교사';
-   el('fuConfirm').checked=false;drawPageRows();
+   el('fuConfirm').checked=false;drawPageRows();persistProgress();
   });
   el('fuPageRows').querySelectorAll('[data-preview]').forEach(img=>img.onclick=()=>safe(async()=>{
    const p=session.pages[Number(img.dataset.preview)];
@@ -421,8 +498,10 @@ export function renderFlexibleUpload(ctx){
    if(a)a.checked=p.start;if(b)b.value=p.role;
   });
  }
- el('fuConfirm').onchange=checkGroups;
+ el('fuConfirm').onchange=()=>{draftConfirmed=el('fuConfirm').checked;checkGroups();persistProgress();};
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
+ el('fuAutoVision').onchange=persistProgress;
+ el('fuAutoAi').onchange=persistProgress;
  el('fuRetryVisual').onclick=()=>safe(async()=>{
   if(!aiServerReady)throw Error('먼저 상단의 AI 서버 연결 점검을 통과해야 합니다.');
   if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
@@ -489,8 +568,8 @@ export function renderFlexibleUpload(ctx){
       pages.push(p);
     }
    }
-   session={pages,groups:null};
-   drawPageRows();el('fuAiScan').disabled=false;
+   session={pages,groups:null,assignByStart:{}};
+   drawPageRows();persistProgress();el('fuAiScan').disabled=false;
    const n=pages.filter(p=>p.needsVisual).length;
    report('PDF '+files.length+'개 · 총 '+pages.length+'쪽의 미리보기를 생성했습니다. AI 이미지 분류 대상 '+n+'쪽.');
    if(n&&el('fuAutoVision').checked&&!aiServerReady){
@@ -508,7 +587,7 @@ export function renderFlexibleUpload(ctx){
    else report('PDF '+files.length+'개, '+pages.length+'쪽 · 인쇄된 STEP 문항을 텍스트에서 모두 구분했습니다. 아래 학생별 분리 결과를 확인하세요.');
   }catch(error){report((session?'AI 자동 판별 실패: ':'PDF 장별 분석 실패: ')+(error?.message||String(error)));throw error;}
   finally{analysisBusy=false;el('fuInspect').disabled=false;picker.disabled=false;
-   for(const id of ['fuClass','fuStart','fuEnd']){const field=el(id);if(field)field.disabled=false;}
+   if(el('fuClass'))el('fuClass').disabled=false;
    if(el('fuAiScan'))el('fuAiScan').disabled=!session;
    const retry=el('fuRetryVisual');
    if(retry)retry.disabled=!session?.pages.some(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked)));
