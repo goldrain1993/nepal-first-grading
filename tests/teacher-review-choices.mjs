@@ -18,8 +18,8 @@ assert.equal(options.area,'algorithm');
 assert.equal(options.positive.points.total-options.negative.points.total,5);
 assert.equal(options.positive.grade.algorithm.level,'중');
 assert.equal(options.negative.grade.algorithm.level,'기초');
-assert.equal(options.positive.points.total,70);
-assert.equal(options.negative.points.total,65);
+assert.equal(options.positive.points.total,75);
+assert.equal(options.negative.points.total,70);
 assert.equal(grade.algorithm.level,'중');
 for(const level of ['상','중상','중','기초']){
  const subject=structuredClone(base);subject.aiCandidateGrade.algorithm.level=level;
