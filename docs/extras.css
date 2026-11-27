@@ -102,3 +102,18 @@
 .ai-audit{margin:12px 0;padding:12px 14px;border:1px solid #d5e2f3;border-radius:8px;background:#f8fbff}
 .ai-audit-area{margin-top:9px;border-top:1px solid #e2ebf5;padding-top:8px}
 .ai-audit-area .thin-note{margin:5px 0;color:#3d5874}
+
+/* AI 판독 불확실: 교사가 두 가지 근거 기반 성취수준 중 하나를 선택 */
+.review-choices{margin:14px 0;padding:15px;border:1px solid #d4e2f1;border-radius:12px;background:#f7fafd}
+.review-choices h3{font-size:15px;color:#274565;margin:0 0 7px}
+.review-choices .thin-note{line-height:1.6}
+.review-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.review-choice{background:white;border:1px solid #d8e2ee;border-radius:10px;padding:13px;display:flex;flex-direction:column;gap:8px}
+.review-choice-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.review-choice-head strong{font-size:13px;color:#294764}
+.review-choice-head b{font-size:20px;color:#173b67;white-space:nowrap}
+.review-choice p{font-size:12px;line-height:1.65;color:#516984;margin:0}
+.review-choice .btn{margin-top:auto;align-self:stretch;min-height:35px}
+.review-observation{padding:10px 12px;background:#eef4fa;border-radius:8px}
+.review-observation .thin-note{margin:6px 0 0}
+@media(max-width:800px){.review-choice-grid{grid-template-columns:1fr}}
