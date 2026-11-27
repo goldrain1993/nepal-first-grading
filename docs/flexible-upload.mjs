@@ -67,7 +67,9 @@ export function renderFlexibleUpload(ctx){
  '<div class="notice" id="fuGroupSummary"></div>'+
  '<label class="identity-check"><input id="fuConfirm" type="checkbox"> 원본 첫 장의 학번·이름과 학생별 페이지 범위·정렬 결과를 확인했습니다. 업로드 후 채점 화면에서도 첫 장을 다시 확인하겠습니다.</label>'+
  '<div class="sub-actions"><label class="mini-check"><input type="checkbox" id="fuAutoAi"> 저장 후 AI 보조 채점도 실행 (별도 API 비용)</label></div>'+
- '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div>');
+ '<p class="notice warn" id="fuUploadBlockReason" role="status">학생별 PDF 판독과 번호 확인을 완료하면 저장할 수 있습니다.</p>'+ 
+ '<div class="sub-actions"><button type="button" class="btn secondary" id="fuJumpIssue" hidden>미확인 학생 번호 확인하기</button>'+ 
+ '<button class="btn primary" id="fuUpload" disabled>확인한 페이지 구성으로 PDF 저장</button></div></div>');
  const updateExpected=(resetForClassChange=false)=>{
   const cur=state.classes.find(x=>String(x.classNo)===el('fuClass').value);
   el('fuInspect').disabled=!cur;
@@ -273,6 +275,17 @@ export function renderFlexibleUpload(ctx){
    const assignedNumbers=rawGroups.map(g=>Number(session.assignByStart[String(session.pages.indexOf(g.pages[0]))])||0);
    const allValid=!unassigned.length&&!duplicates.length&&!missing.length;
    session.groups=allValid?groupPages(session.pages,assignedNumbers):null;
+   const blockers=[];
+   if(unassigned.length)blockers.push('학생 번호 미지정 '+unassigned.length+'명 (PDF 학생 순서 '+unassigned.join(', ')+')');
+   if(duplicates.length)blockers.push('학생 번호 중복: '+[...new Set(duplicates)].join(', ')+'번');
+   if(missing.length)blockers.push('등록된 학생 명단에 없는 번호: '+[...new Set(missing)].join(', ')+'번');
+   const reason=el('fuUploadBlockReason'),jump=el('fuJumpIssue');
+   if(reason){
+    reason.textContent=blockers.length?'저장 불가: '+blockers.join(' / ')+' · 위 학생별 확인표에서 번호를 수정하세요.':
+      el('fuConfirm').checked?'학생별 번호 확인 완료. PDF 저장 버튼을 누를 수 있습니다.':'학생별 번호 확인 완료. 원본 첫 장 대조 확인 체크박스를 선택해야 저장할 수 있습니다.';
+    reason.className=blockers.length?'notice warn':'notice good';
+   }
+   if(jump)jump.hidden=!blockers.length;
    const notice=unassigned.length?' · 번호 미확인 '+unassigned.length+'명':'';
    const duplicateNotice=duplicates.length?' · 중복 번호 '+[...new Set(duplicates)].join(', ')+'번':'';
    const invalidNotice=missing.length?' · 등록되지 않은 번호 '+[...new Set(missing)].join(', ')+'번':'';
@@ -289,6 +302,9 @@ export function renderFlexibleUpload(ctx){
   }catch(e){
    session.groups=null;
    el('fuGroupSummary').textContent='확인 필요: '+e.message;
+   const reason=el('fuUploadBlockReason'),jump=el('fuJumpIssue');
+   if(reason){reason.textContent='저장 불가: '+e.message+' · 위 페이지 분류표에서 STEP과 학생 시작 위치를 확인하세요.';reason.className='notice warn';}
+   if(jump)jump.hidden=false;
    el('fuUpload').disabled=true;
   }
  }
@@ -500,6 +516,14 @@ export function renderFlexibleUpload(ctx){
    if(a)a.checked=p.start;if(b)b.value=p.role;
   });
  }
+ el('fuJumpIssue').onclick=()=>{
+  const inputs=[...el('fuGroupSummary').querySelectorAll('[data-group-number]')];
+  const values=inputs.map(x=>x.value);
+  const input=inputs.find((x,i)=>!x.value||values.indexOf(x.value)!==i);
+  const target=input||el('fuGroupSummary');
+  target.scrollIntoView({behavior:'smooth',block:'center'});
+  if(input)input.focus({preventScroll:true});
+ };
  el('fuConfirm').onchange=()=>{draftConfirmed=el('fuConfirm').checked;checkGroups();persistProgress();};
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
  el('fuAutoVision').onchange=()=>{draftAutoVision=el('fuAutoVision').checked;persistProgress();};
