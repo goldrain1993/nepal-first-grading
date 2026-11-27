@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {inferPageRole,applyVisualPageResult,groupPages} from '../docs/page-grouping.mjs';
+import {inferPageRole,applyVisualPageResult,groupPages,recognizedStudentNumber} from '../docs/page-grouping.mjs';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const {TEST_SETS,testValueCheck}=require('../functions/test-rules.js');
@@ -45,6 +45,12 @@ const pages=[
   {start:false,role:'algorithm',pageNo:5},
   {start:true,role:'front',pageNo:6}
 ];
+assert.equal(recognizedStudentNumber('10101',1),1);
+assert.equal(recognizedStudentNumber('26-10135',1),35);
+assert.equal(recognizedStudentNumber('10135',2),null);
+assert.equal(recognizedStudentNumber('8',1),8);
+assert.deepEqual(groupPages(pages).map(x=>x.number),[null,null,null]); // 번호 범위 강제 없는 부분 업로드
+assert.deepEqual(groupPages(pages,[1,8,35]).map(x=>x.number),[1,8,35]); // 불연속 번호 배정
 const groups=groupPages(pages,names);
 assert.equal(groups.length,3);
 assert.deepEqual(groups.map(g=>g.pages.length),[3,2,1]);
