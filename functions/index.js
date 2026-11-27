@@ -54,6 +54,8 @@ exports.gradeAnswerV2=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSe
     const sensor=clean(e.sensor,50),value=clean(e.value,100),check=testValueCheck(value,sensor,assignedTestNo);
     return {sensor,value,valid:check.valid,reason:check.reason,basis:check.basis};
   }):[];
+  if(!testChecks.length&&checks.algorithm.test.status==='충족')
+    reviewReasons.push('STEP 4 학생 TEST 답안값을 판독하지 못했으므로 정확 판정을 확인해야 합니다.');
   if(testChecks.some(c=>!c.valid)&&checks.algorithm.test.status==='충족')
     reviewReasons.push('STEP 4 TEST 값의 공식 데이터 검증 결과와 AI의 충족 판정이 불일치하여 교사 확인이 필요합니다.');
   const id=result.identity||{},recognizedNo=clean(id.number,50).trim(),recognizedName=clean(id.name,80).trim(),confidence=['높음','보통','낮음'].includes(id.confidence)?id.confidence:'낮음';
