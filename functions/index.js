@@ -58,17 +58,65 @@ exports.gradeAnswer=onCall({region:'asia-northeast3',memory:'512MiB',timeoutSeco
 
 // 학생 이름이 있는 첫 장과 STEP을 이미지에서 판독하는 AI 페이지 분류기.
 // 교사의 직접 실행/확인 필요, 스캔본 이미지가 외부 AI에 전송됨.
+
+// 오류 진단에서는 학생 이름, 학번, PDF 이미지 또는 OpenAI 키 문자열을 기록하지 않는다.
+function logInspectFailure(stage,err){
+ const safe={stage,type:String(err?.name||'Error').slice(0,50),
+  code:String(err?.code||'').slice(0,90),
+  apiStatus:Number(err?.apiStatus)||undefined,
+  causeCode:String(err?.cause?.code||'').slice(0,90)};
+ console.error('INSPECT_PAGES_DIAGNOSTIC',safe);
+}
+function httpError(status){
+ const e=new Error('OpenAI returned error status');
+ e.apiStatus=status;
+ return e;
+}
+
 exports.inspectPages=onCall({
-  region:'asia-northeast3',memory:'512MiB',timeoutSeconds:120,maxInstances:2,secrets:[OPENAI_API_KEY]
+ region:'asia-northeast3',memory:'512MiB',timeoutSeconds:120,maxInstances:2,secrets:[OPENAI_API_KEY]
 },async request=>{
+ let stage='firebase-auth';
+ try{
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','교사 로그인이 필요합니다.');
+  stage='firestore-teacher-check';
   const teacher=await admin.firestore().doc('teachers/'+request.auth.uid).get();
-  if(!teacher.exists)throw new HttpsError('permission-denied','교사 권한이 없습니다.');
+  if(!teacher.exists)throw new HttpsError('permission-denied','등록된 교사 권한을 찾지 못했습니다.');
+  stage='firebase-secret';
+  const secret=OPENAI_API_KEY.value();
+  if(!secret)throw new HttpsError('failed-precondition','OPENAI_API_KEY 비밀키가 등록되지 않았습니다.');
+
+  // 155쪽 스캔 파일을 다시 분석하지 않고 인증/네트워크/모델 사용가능 여부만 확인.
+  // 진단에는 학생 이미지와 개인정보가 사용되지 않는다.
+  if(request.data?.diagnose===true){
+    stage='openai-network';
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+    try{
+      const models=await fetch('https://api.openai.com/v1/models/gpt-4.1-mini',{
+        method:'GET',headers:{Authorization:'Bearer '+secret},signal:controller.signal
+      });
+      if(!models.ok)throw httpError(models.status);
+    }finally{clearTimeout(timer);}
+    stage='openai-text-inference';
+    const controller2=new AbortController(),timer2=setTimeout(()=>controller2.abort(),20000);
+    try{
+      const response=await fetch('https://api.openai.com/v1/chat/completions',{
+        method:'POST',headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
+        body:JSON.stringify({model:'gpt-4.1-mini',messages:[{role:'user',content:'Reply OK.'}],max_tokens:8,temperature:0}),
+        signal:controller2.signal
+      });
+      if(!response.ok)throw httpError(response.status);
+    }finally{clearTimeout(timer2);}
+    return {ok:true,auth:'ok',firestore:'ok',secret:'ok',openai:'ok',model:'gpt-4.1-mini'};
+  }
+
+  stage='image-validation';
   const images=request.data?.images;
   if(!Array.isArray(images)||images.length<1||images.length>6||
       images.some(v=>typeof v!=='string'||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v)||v.length>1500000)||
       images.reduce((sum,v)=>sum+v.length,0)>8000000)
     throw new HttpsError('invalid-argument','한 번에 1~6쪽, 이미지당 1.5MB 이하로 전송하세요.');
+
   const content=[{type:'text',text:[
     '역할: 중학교 1학년 네팔 홍수 조기경보 시스템 수행평가의 인쇄된 5종 양식을 페이지 이미지로 판별한다. 반드시 **각 이미지의 실제 인쇄 제목, 문항 번호, 표/칸 배치**를 보고 분류한다.',
     '실제 학생 답안은 손글씨가 있어도 페이지 역할을 알 수 있고, 일부 장이 빠지거나 서로 순서가 바뀔 수 있다. 학생당 1~5장이다. 페이지 번호/전달 순서나 5장 묶음으로 추정하지 말라.',
@@ -91,19 +139,24 @@ exports.inspectPages=onCall({
     content.push({type:'text',text:'원본 페이지 '+(i+1)});
     content.push({type:'image_url',image_url:{url:src,detail:'high'}});
   });
+  stage='openai-image-inference';
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),95000);
   let result;
   try{
     const resp=await fetch('https://api.openai.com/v1/chat/completions',{
       method:'POST',
-      headers:{Authorization:'Bearer '+OPENAI_API_KEY.value(),'Content-Type':'application/json'},
-      body:JSON.stringify({model:'gpt-4.1-mini',messages:[{role:'user',content}],response_format:{type:'json_object'},max_tokens:1800,temperature:0})
+      headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
+      body:JSON.stringify({model:'gpt-4.1-mini',messages:[{role:'user',content}],response_format:{type:'json_object'},max_tokens:1800,temperature:0}),
+      signal:controller.signal
     });
-    const json=await resp.json();
-    if(!resp.ok){const err=new Error('OpenAI API 호출 실패');err.apiStatus=resp.status;throw err;}
-    result=JSON.parse(json.choices?.[0]?.message?.content||'{}');
-  }catch(e){throw openAiFailure(e,'페이지 판별');}
+    if(!resp.ok)throw httpError(resp.status);
+    const data=await resp.json();
+    stage='openai-image-response';
+    result=JSON.parse(data.choices?.[0]?.message?.content||'{}');
+  }finally{clearTimeout(timer);}
+  stage='response-validation';
   if(!Array.isArray(result.pages)||result.pages.length!==images.length)
-    throw new HttpsError('internal','AI 결과에서 페이지 수가 일치하지 않습니다.');
+    throw new HttpsError('failed-precondition','AI 페이지 분류 결과 개수가 일치하지 않습니다.'); 
   const allowed=['front','data-cont','strategy','algorithm','test','unknown'];
   return {pages:result.pages.map(p=>({
     role:allowed.includes(p.role)?p.role:'unknown',
@@ -112,4 +165,11 @@ exports.inspectPages=onCall({
     confidence:['높음','보통','낮음'].includes(p.confidence)?p.confidence:'낮음',
     reason:clean(p.reason,120)
   }))};
+ }catch(error){
+  logInspectFailure(stage,error);
+  if(error instanceof HttpsError)throw error;
+  if(error?.apiStatus)throw openAiFailure(error,'AI 페이지 분석');
+  if(error?.name==='AbortError')throw new HttpsError('deadline-exceeded','AI 진단/분석 단계 '+stage+'에서 요청 시간이 초과됐습니다.');
+  throw new HttpsError('internal','AI 서버 내부 오류 발생 단계: '+stage+'. Cloud Run 로그에서 INSPECT_PAGES_DIAGNOSTIC을 확인하세요.');
+ }
 });
