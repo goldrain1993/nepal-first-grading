@@ -43,9 +43,11 @@ export function renderFlexibleUpload(ctx){
  '<div id="fuFileList" class="pdf-file-list" aria-live="polite"></div>'+
  '<p class="help-text">선택한 모든 파일을 표시된 순서대로 연결하여 분석합니다. ↑↓ 버튼으로 순서를 변경할 수 있습니다. 학생당 1~5장입니다.</p>'+ 
  '<label class="pdf-auto-vision"><input type="checkbox" id="fuAutoVision" checked> <span><strong>스캔본의 인쇄 제목·문항·페이지 모양까지 AI가 자동 판별</strong><small>PDF 분석 후 AI 실행 전 개인정보 외부 전송·비용에 관한 확인창이 나타납니다. 동의하지 않으면 AI는 호출되지 않습니다.</small></span></label>'+
- '<div class="sub-actions"><button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
+ '<div class="sub-actions"><button class="btn secondary" id="fuDiagnose">AI 서버 연결 점검 (PDF 미전송)</button>'+
+ '<button class="btn primary" id="fuInspect">PDF 장별 분석 시작</button>'+
  '<button class="btn secondary" id="fuAiScan" disabled>↻ AI로 미판별 페이지 다시 분석</button>'+ 
  '<button class="btn secondary" id="fuStopAi" disabled hidden>AI 페이지 판별 중단</button></div>'+
+ '<p id="fuDiagnosticStatus" class="help-text" role="status">먼저 AI 서버 연결을 점검하세요. PDF 이미지와 학생정보는 전송하지 않습니다.</p>'+
  '<p id="fuStatus" class="help-text" role="status"></p></div>'+
  '<div class="panel" id="fuReview" hidden><div class="panel-head"><h2>03. AI 페이지 판별·학생별 분리 확인</h2></div>'+ 
  '<div id="fuAiProgress" class="pdf-ai-progress" role="status" aria-live="polite">'+
@@ -75,7 +77,7 @@ export function renderFlexibleUpload(ctx){
  };
  el('fuStart').oninput=updateExpected;el('fuEnd').oninput=updateExpected;
  const report=s=>{if(el('fuStatus'))el('fuStatus').textContent=s};
- let analysisBusy=false,visualBusy=false,visualCancel=false;
+ let analysisBusy=false,visualBusy=false,visualCancel=false,aiServerReady=false;
  const resetReview=()=>{
   session=null;
   el('fuReview').hidden=true;
@@ -355,6 +357,7 @@ export function renderFlexibleUpload(ctx){
  el('fuConfirm').onchange=checkGroups;
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
  el('fuRetryVisual').onclick=()=>safe(async()=>{
+  if(!aiServerReady)throw Error('먼저 상단의 AI 서버 연결 점검을 통과해야 합니다.');
   if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
   const pendingCount=session.pages.filter(p=>!p.manualEdited&&p.needsVisual&&!p.visualChecked).length;
   const n=pendingCount||session.pages.filter(p=>!p.manualEdited&&p.visualChecked&&p.role==='unknown').length;
@@ -365,6 +368,29 @@ export function renderFlexibleUpload(ctx){
   await runVisualClassification(true);
  });
  el('fuStopAi').onclick=()=>{visualCancel=true;report('현재 AI 요청이 끝나면 나머지 페이지 판별을 중단합니다.');};
+
+ el('fuDiagnose').onclick=()=>safe(async()=>{
+  if(analysisBusy||visualBusy)throw Error('PDF 분석이 진행 중일 때는 서버 점검을 실행할 수 없습니다.');
+  if(!await ask('학생 PDF 없이 AI 서버 점검',
+    '이 점검은 학생 PDF와 이름을 보내지 않습니다. Firebase 교사 인증, Firestore 권한, 비밀키, OpenAI 모델 접근과 짧은 텍스트 요청을 확인하며 소액의 OpenAI API 사용료가 발생할 수 있습니다. 실행하시겠습니까?',
+    'AI 서버 점검 실행'))return;
+  const button=el('fuDiagnose'),status=el('fuDiagnosticStatus');
+  button.disabled=true;aiServerReady=false;
+  status.textContent='서버 연결 검사 중: 교사 인증 → Firestore → API 비밀키 → OpenAI 모델·텍스트 요청';
+  try{
+   const fn=httpsCallable(ctx.functions,'inspectPages',{timeout:60000});
+   const response=await fn({diagnose:true});
+   const data=response.data||{};
+   if(!data.ok||data.auth!=='ok'||data.firestore!=='ok'||data.secret!=='ok'||data.openai!=='ok')
+    throw Error('AI 서버 응답이 진단 성공 상태가 아닙니다.');
+   aiServerReady=true;
+   status.textContent='✓ AI 서버 점검 통과: 교사 인증 · Firestore · API Secret · OpenAI 연결 및 모델 호출 정상. 이제 PDF 자동 분석을 진행할 수 있습니다.';
+  }catch(e){
+   status.textContent='✕ AI 서버 점검 실패: '+friendlyAiError(e)+' (오류 코드 '+String(e?.code||'정보 없음')+'). PDF 대량 분석 전에 서버 로그를 확인해야 합니다.';
+   throw e;
+  }finally{button.disabled=false;}
+ });
+
  el('fuInspect').onclick=()=>safe(async()=>{
   if(session)session=null;
   const files=[...selectedFiles];if(!files.length)throw Error('분석할 PDF 파일을 먼저 추가하세요.');
@@ -400,7 +426,11 @@ export function renderFlexibleUpload(ctx){
    drawPageRows();el('fuAiScan').disabled=false;
    const n=pages.filter(p=>p.needsVisual).length;
    report('PDF '+files.length+'개 · 총 '+pages.length+'쪽의 미리보기를 생성했습니다. AI 이미지 분류 대상 '+n+'쪽.');
-   if(n&&el('fuAutoVision').checked){
+   if(n&&el('fuAutoVision').checked&&!aiServerReady){
+    report('PDF '+pages.length+'쪽의 미리보기 준비 완료. AI 서버 연결 점검에 통과하지 않아 이미지 자동 전송을 시작하지 않았습니다. 상단 [AI 서버 연결 점검]을 먼저 실행한 뒤, 아래 [남은 미판별 페이지 AI 분석 계속]을 누르세요.');
+    updateAiProgress('skipped','AI 서버 진단 미통과 · 학생 PDF 전송 보류');
+   }
+   else if(n&&el('fuAutoVision').checked){
     const permitted=await ask('스캔 PDF 이미지 AI 분석 동의',
       '스캔된 답안 '+n+'쪽의 페이지 이미지(학생 이름·학번과 필기 포함)를 외부 OpenAI API에 전송해 STEP 제목·문항·레이아웃을 분석합니다. API 사용료가 발생하며 학교 개인정보 처리·외부 전송 지침을 확인해야 합니다. 실행하시겠습니까?',
       '동의하고 AI 자동 판별');
@@ -418,6 +448,7 @@ export function renderFlexibleUpload(ctx){
   }
  });
  el('fuAiScan').onclick=()=>safe(async()=>{
+  if(!aiServerReady)throw Error('AI 서버 연결 점검을 먼저 통과해야 합니다. PDF 이미지 전송은 시작되지 않았습니다.');
   if(!session)throw Error('PDF 장별 분석부터 실행하세요.');
   const pendingCount=session.pages.filter(p=>!p.manualEdited&&p.needsVisual&&!p.visualChecked).length;
   const n=pendingCount||session.pages.filter(p=>!p.manualEdited&&p.visualChecked&&p.role==='unknown').length;
