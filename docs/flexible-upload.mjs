@@ -226,7 +226,7 @@ export function renderFlexibleUpload(ctx){
   for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
    const field=el(id);if(field)field.disabled=true;
   }
-  let processed=0,high=0,medium=0,unresolved=0;
+  let processed=0,high=0,medium=0,unresolved=0,finalPhase='idle',finalMessage='';
   updateAiProgress('running','요청한 '+candidates.length+'쪽을 순차 처리합니다.');
   try{
    const callable=httpsCallable(ctx.functions,'inspectPages',{timeout:120000});
@@ -269,10 +269,12 @@ export function renderFlexibleUpload(ctx){
    const finishedMessage=(visualCancel?'AI 분석 중단':'AI 이미지 자동 판별 완료')
       +' · '+processed+'/'+candidates.length+'쪽 처리 · AI 높음 '+high+' / 보통 '+medium
       +' / 판별 불확실 '+unresolved+'쪽. 학생별 첫 장의 이름·학번은 저장 전에 확인하세요.';
+   finalPhase=visualCancel?'cancel':'done';finalMessage=finishedMessage;
    report(finishedMessage);
-   updateAiProgress(visualCancel?'cancel':'done',finishedMessage);
+   updateAiProgress(finalPhase,finishedMessage);
   }catch(e){
    const info=friendlyAiError(e);
+   finalPhase='error';finalMessage=info;
    report('AI 분석 실패: '+info);
    updateAiProgress('error',info);
    throw e;
@@ -284,7 +286,7 @@ export function renderFlexibleUpload(ctx){
    for(const id of ['fuInspect','fuFiles','fuClass','fuStart','fuEnd']){
     const field=el(id);if(field)field.disabled=analysisBusy;
    }
-   updateAiProgress(visualCancel?'cancel':'idle');
+   updateAiProgress(finalPhase,finalMessage);
   }
  }
  function drawPageRows(){
@@ -316,6 +318,7 @@ export function renderFlexibleUpload(ctx){
    document.body.appendChild(modal);modal.onclick=()=>modal.remove();
   }));
   updateReviewFilter();checkGroups();
+  if(!visualBusy)updateAiProgress('idle');
  }
  function drawUpdatedSelectors(){
   session.pages.forEach((p,i)=>{
@@ -326,6 +329,15 @@ export function renderFlexibleUpload(ctx){
  }
  el('fuConfirm').onchange=checkGroups;
  el('fuOnlyNeedsReview').onchange=updateReviewFilter;
+ el('fuRetryVisual').onclick=()=>safe(async()=>{
+  if(!session)throw Error('먼저 PDF 장별 분석을 실행하세요.');
+  const n=session.pages.filter(p=>!p.manualEdited&&(p.role==='unknown'||((p.needsVisual||p.confidence==='보통')&&!p.visualChecked))).length;
+  if(!n){report('추가 AI 분류가 필요한 페이지가 없습니다.');return;}
+  if(!await ask('남은 페이지 AI 자동 판별',
+   '미판별·불확실 '+n+'쪽의 이미지를 외부 OpenAI API로 전송합니다. 개인정보 외부 전송·API 비용 발생을 확인하고 허용합니까?',
+   '동의하고 남은 페이지 판별'))return;
+  await runVisualClassification();
+ });
  el('fuStopAi').onclick=()=>{visualCancel=true;report('현재 AI 요청이 끝나면 나머지 페이지 판별을 중단합니다.');};
  el('fuInspect').onclick=()=>safe(async()=>{
   if(session)session=null;
