@@ -48,6 +48,9 @@ assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[2,1,1
 assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[1,1,1,'갑'],[1,1,1,'을']]),/중복/);
 assert.throws(()=>parseXlsxRosterRows([['학년','반','번호','이름'],[1,1,1,'']]),/모두 입력/);
 assert.throws(()=>parseXlsxRosterRows([['반','학년','번호','이름'],[1,1,1,'갑']]),/첫 행/);
-assert.deepEqual(rangesForPages([{name:'test.pdf',pages:20}],1,23,inferred[0].missingNos).map(x=>x.number),[1,3,21,23]);
+// 5쪽 고정 양식의 과거 배정 함수는 남학생·여학생의 실제 번호 구간을 따로 호출한다.
+const boyPages=rangesForPages([{name:'boys.pdf',pages:10}],1,3,[2]);
+const girlPages=rangesForPages([{name:'girls.pdf',pages:10}],21,23,[22]);
+assert.deepEqual([...boyPages,...girlPages].map(x=>x.number),[1,3,21,23]);
 
 console.log('검증 통과: CSV / XLSX 명단 / 남녀 번호 구간 / 자동 결번 / 5쪽 배정 / 배점');
