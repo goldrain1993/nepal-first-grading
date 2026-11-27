@@ -182,11 +182,40 @@ function updateClassCounts(){
 }
 function rosterSlot(klass,n){const missing=(klass.missingNos||[]).includes(n);if(missing)return `<div class="roster-entry roster-missing"><span>${n}번</span><em>결번</em></div>`;return `<label class="roster-entry"><span>${n}번</span><input data-student="${n}" maxlength="80" placeholder="이름" value="${esc(studentName(klass.classNo,n)==='미등록'?'':studentName(klass.classNo,n))}" /></label>`}
 function renderRoster(){if(!state.classes.length){main(heading('STUDENT ROSTER','학생 명단 관리','학급을 먼저 등록해야 합니다.')+`<div class="panel">학급 설정을 먼저 저장하세요. ${button('toSettings','설정으로 이동','primary')}</div>`);$('toSettings').onclick=()=>nav('settings');return;}const klass=cBy(ui.rosterClass)||state.classes[0];ui.rosterClass=klass.classNo;main(heading('STUDENT ROSTER','학생 명단 관리','학교 번호 체계에 따라 남학생은 1~20번, 여학생은 21번부터 표시합니다. 결번은 학급 설정에서 지정합니다.')+schoolExcelPanel()+
- `<div class="panel"><div class="panel-head"><h2>${klass.classNo}반 학생 이름 (결번 ${((klass.missingNos||[]).length)}개)</h2><div class="toolbar"><select class="control" id="rosterClass">${optsClass(ui.rosterClass)}</select>${button('saveRoster','명단 저장','primary')}</div></div><div class="roster-band-title">남학생 번호 (1~20번)</div><div class="roster-grid">${(klass.genderBandsDefined?activeNumbers(klass).filter(n=>n<=20):Array.from({length:Math.max(0,Math.min(20,klass.endNo)-klass.startNo+1)},(_,i)=>i+klass.startNo)).map(n=>rosterSlot(klass,n)).join('')}</div><div class="roster-band-title">여학생 번호 (21번부터)</div><div class="roster-grid">${(klass.genderBandsDefined?activeNumbers(klass).filter(n=>n>=21):Array.from({length:Math.max(0,klass.endNo-Math.max(21,klass.startNo)+1)},(_,i)=>i+Math.max(21,klass.startNo))).map(n=>rosterSlot(klass,n)).join('')}</div><p class="help-text">회색 결번 칸은 학생이 없으므로 이름을 입력하지 않습니다. 결번은 [설정]에서 변경하며, 이미 답안이 등록된 번호는 삭제할 수 없습니다.</p></div><div class="panel"><div class="panel-head"><h2>CSV 명단 일괄 등록</h2></div><p class="thin-note">CSV 형식: <code>반,번호,이름</code> · 여러 학급 한 번에 등록 가능 · UTF-8 또는 CP949 지원</p><div class="toolbar"><input id="rosterCsv" class="control" type="file" accept=".csv,text/csv">${button('importRoster','CSV 가져오기','primary')}${button('downloadSample','CSV 양식 다운로드')}</div></div>`);
+ `<div class="panel"><div class="panel-head"><h2>${klass.classNo}반 학생 이름 (결번 ${((klass.missingNos||[]).length)}개)</h2><div class="toolbar"><select class="control" id="rosterClass">${optsClass(ui.rosterClass)}</select>${button('saveRoster','명단 저장','primary')}</div></div><div class="roster-band-title">남학생 번호 (1~20번)</div><div class="roster-grid">${(klass.genderBandsDefined?(klass.boysStart!=null?Array.from({length:klass.boysEnd-klass.boysStart+1},(_,i)=>i+klass.boysStart):[]):Array.from({length:Math.max(0,Math.min(20,klass.endNo)-klass.startNo+1)},(_,i)=>i+klass.startNo)).map(n=>rosterSlot(klass,n)).join('')}</div><div class="roster-band-title">여학생 번호 (21번부터)</div><div class="roster-grid">${(klass.genderBandsDefined?(klass.girlsStart!=null?Array.from({length:klass.girlsEnd-klass.girlsStart+1},(_,i)=>i+klass.girlsStart):[]):Array.from({length:Math.max(0,klass.endNo-Math.max(21,klass.startNo)+1)},(_,i)=>i+Math.max(21,klass.startNo))).map(n=>rosterSlot(klass,n)).join('')}</div><p class="help-text">회색 결번 칸은 학생이 없으므로 이름을 입력하지 않습니다. 결번은 [설정]에서 변경하며, 이미 답안이 등록된 번호는 삭제할 수 없습니다.</p></div><div class="panel"><div class="panel-head"><h2>CSV 명단 일괄 등록</h2></div><p class="thin-note">CSV 형식: <code>반,번호,이름</code> · 기존 학생·답안은 유지하고 새 학생만 추가합니다. UTF-8 또는 CP949 지원</p><div class="toolbar"><input id="rosterCsv" class="control" type="file" accept=".csv,text/csv">${button('importRoster','CSV 가져오기','primary')}${button('downloadSample','CSV 양식 다운로드')}</div></div>`);
  bindSchoolExcelPanel();
  $('rosterClass').onchange=e=>{ui.rosterClass=Number(e.target.value);renderRoster()};
  $('saveRoster').onclick=()=>safe(async()=>{const updates=[...document.querySelectorAll('[data-student]')].map(e=>({classNo:klass.classNo,number:Number(e.dataset.student),name:e.value.trim()}));if(updates.some(v=>v.name.length>80))throw Error('이름은 80자까지 입력 가능합니다.');for(const x of updates){if(!x.name&&state.submissions.some(s=>s.classNo===x.classNo&&s.assignedNo===x.number))throw Error(`${x.number}번은 답안이 있으므로 이름을 지울 수 없습니다.`)}const b=writeBatch(db);updates.forEach(x=>{const d=doc(db,'roster',`${x.classNo}-${x.number}`);if(x.name)b.set(d,x);else b.delete(d)});await b.commit();toast('학생 명단을 저장했습니다.');await nav('roster')});
- $('importRoster').onclick=()=>safe(async()=>{const file=$('rosterCsv').files[0];if(!file)throw Error('CSV 파일을 선택하세요.');if(file.size>2_000_000)throw Error('CSV는 2MB 이하로 제한됩니다.');const buf=await file.arrayBuffer();let str;try{str=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch{str=new TextDecoder('euc-kr').decode(buf)}const people=parseCsv(str);if(people.length>4500)throw Error('한 번에 4,500명 이하로 등록하세요.');for(const x of people){const c=cBy(x.classNo);if(!c||x.number<c.startNo||x.number>c.endNo)throw Error(`${x.classNo}반 ${x.number}번은 학급 범위 밖입니다.`);if((c.missingNos||[]).includes(x.number))throw Error(`${x.classNo}반 ${x.number}번은 결번입니다. 먼저 [설정]에서 결번을 수정하세요.`)}if(!await ask('CSV 명단 가져오기',`${people.length}명의 이름을 등록·갱신합니다. 기존 같은 번호 이름은 변경됩니다.`,'등록'))return;for(let i=0;i<people.length;i+=400){const b=writeBatch(db);people.slice(i,i+400).forEach(x=>b.set(doc(db,'roster',`${x.classNo}-${x.number}`),x));await b.commit();}toast(`${people.length}명 등록 완료`);await nav('roster')});
+ $('importRoster').onclick=()=>safe(async()=>{
+  const file=$('rosterCsv').files[0];if(!file)throw Error('CSV 파일을 선택하세요.');
+  if(file.size>2_000_000)throw Error('CSV는 2MB 이하로 제한됩니다.');
+  const buf=await file.arrayBuffer();let str;
+  try{str=new TextDecoder('utf-8',{fatal:true}).decode(buf);}catch{str=new TextDecoder('euc-kr').decode(buf);}
+  const incoming=parseCsv(str).map(x=>({gradeNo:1,...x}));
+  if(incoming.length>4500)throw Error('한 번에 4,500명 이하로 등록하세요.');
+  await loadAll();
+  const before=mergeRosterImport(state.roster,incoming,state.submissions);
+  if(new Set([...state.classes.map(c=>c.classNo),...before.affected]).size>50)
+   throw Error('등록 가능한 학급 수는 50개입니다.');
+  if(before.classes.length+before.added.length>450)
+   throw Error('한 번에 450개 이하의 자료만 추가할 수 있습니다. CSV를 반별로 나눠 주세요.');
+  const msg='CSV '+incoming.length+'명 중 신규 '+before.added.length+'명만 추가합니다. '
+   +'중복 번호의 이름이 같은 '+before.unchanged.length+'명과 이름이 다른 '+before.conflicts.length+'명은 기존 정보를 유지합니다. '
+   +'각 반의 남녀 첫·끝 번호 구간과 결번을 갱신하고 기존 PDF·채점 결과는 보존합니다. 저장하시겠습니까?';
+  if(!await ask('CSV 명단 추가·병합',msg,'신규 명단 추가'))return;
+  await loadAll();
+  const latest=mergeRosterImport(state.roster,incoming,state.submissions);
+  if(JSON.stringify(before.classes)!==JSON.stringify(latest.classes)||
+     JSON.stringify(before.added)!==JSON.stringify(latest.added))
+   throw Error('확인 중 학생 명단이 변경됐습니다. CSV를 다시 확인하세요.');
+  const batch=writeBatch(db);
+  for(const c of latest.classes)batch.set(doc(db,'classes',String(c.classNo)),c);
+  for(const x of latest.added)batch.set(doc(db,'roster',x.classNo+'-'+x.number),
+   {gradeNo:1,classNo:x.classNo,number:x.number,name:x.name});
+  await batch.commit();
+  toast('CSV 신규 '+latest.added.length+'명 추가, 기존 명단과 답안 유지');
+  await nav('roster');
+ });
  $('downloadSample').onclick=()=>download('학생명단_양식.csv',toCsv([['반','번호','이름'],['1','1','김민수'],['1','21','이서연'],['2','2','박지훈']]),'text/csv;charset=utf-8');}
 function download(name,content,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000)}
 
