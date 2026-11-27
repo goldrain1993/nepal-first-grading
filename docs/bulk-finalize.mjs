@@ -1,4 +1,4 @@
-import {activeNumbers,score} from './core.mjs';
+import {activeNumbers,score} from './core.mjs?v=2';
 
 // 반 전체의 등록 명단·PDF·신원 확인·교사 채점 저장 상태를 모두 점검한다.
 // 일부 학생만 업로드한 경우는 아직 '반 전체 확정' 상태가 아니다.
