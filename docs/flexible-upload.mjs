@@ -627,7 +627,7 @@ export function renderFlexibleUpload(ctx){
   const uploaded=[];
   try{
    const b=writeBatch(db);
-   b.set(doc(db,'batches',batchId),{classNo:cls,startNo:start,endNo:end,status:'진행 중',createdAt:serverTimestamp()});
+   b.set(doc(db,'batches',batchId),{classNo:cls,startNo:start,endNo:end,studentNumbers:studentNos,status:'진행 중',createdAt:serverTimestamp()});
    groups.forEach((g,i)=>{
     b.set(doc(db,'submissions',ids[i]),{
       batchId,classNo:cls,expectedNo:g.number,assignedNo:g.number,
