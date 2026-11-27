@@ -1,9 +1,12 @@
 name: Validate web app
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
     paths:
       - "docs/**"
+      - "functions/**"
       - "tests/**"
       - ".github/workflows/validate.yml"
   workflow_dispatch:
@@ -24,6 +27,12 @@ jobs:
           node --check docs/flexible-upload.mjs
           node --check functions/index.js
           node --check functions/test-rules.js
+          node --check functions/grading-validation.js
+          node --check docs/ai-grading-batch.mjs
+      - name: AI evidence and selected-student grading tests
+        run: |
+          node tests/grading-validation.cjs
+          node tests/ai-grading-batch.mjs
       - name: Excel roster and PDF assignment tests
         run: node tests/smoke.mjs
       - name: Variable pages and grading rules

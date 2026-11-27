@@ -15,13 +15,16 @@ const students=[
  {id:'f',classNo:1,assignedNo:6,status:'uploading',finalized:false,aiGrade:middle,aiStatus:'AI 완료'},
  {id:'g',classNo:2,assignedNo:1,status:'ready',finalized:false,aiGrade:middle,aiStatus:'AI 완료'}
 ];
-const ids=mode=>aiGradingCandidates(students,1,mode,DEFAULT_RUBRIC).map(s=>s.id);
+const ids=(mode,cl=1,selected=[])=>aiGradingCandidates(students,cl,mode,DEFAULT_RUBRIC,selected).map(s=>s.id);
 assert.equal(aiSuggestedPoints(students[0],DEFAULT_RUBRIC).total,60);
-assert.deepEqual(ids('sixty'),['a','d']);
+assert.equal(aiSuggestedPoints(students[3],DEFAULT_RUBRIC),null);
 assert.deepEqual(ids('pending'),['c','d']);
 assert.deepEqual(ids('all'),['a','b','c','d']);
-assert.equal(students[3].teacherGrade,high); // 교사 점수는 후보 선별에서 변경되지 않음
-assert.ok(['sixty','pending','all'].every(mode=>!ids(mode).some(id=>['e','f','g'].includes(id))));
-assert.throws(()=>aiGradingCandidates(students,0,'sixty',DEFAULT_RUBRIC),/학급/);
-assert.throws(()=>aiGradingCandidates(students,1,'unknown',DEFAULT_RUBRIC),/유형/);
-console.log('통과: AI 60점 재채점 / 미채점 / 전체 재분석 대상을 안전하게 선별');
+assert.deepEqual(ids('selected',1,['d','a','e','f']),['a','d']);
+assert.deepEqual(ids('selected','all',['g','b','e']),['b','g']);
+assert.deepEqual(ids('selected',1,[]),[]);
+assert.equal(students[3].teacherGrade,high);
+assert.ok(['selected','pending','all'].every(mode=>!ids(mode,1,['a','e','f']).some(id=>['e','f','g'].includes(id))));
+assert.throws(()=>aiGradingCandidates(students,0,'all',DEFAULT_RUBRIC),/학급/);
+assert.throws(()=>aiGradingCandidates(students,1,'sixty',DEFAULT_RUBRIC),/유형/);
+console.log('통과: 점수 구분 없는 학생 선택 / 전체선택 / 오류·미채점 선별 / 교사 기록 보존');
