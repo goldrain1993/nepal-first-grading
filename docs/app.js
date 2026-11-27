@@ -6,7 +6,8 @@ import {getFunctions,httpsCallable} from 'https://www.gstatic.com/firebasejs/13.
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 import {firebaseConfig} from './firebase-config.js';
 import {readSchoolExcel,downloadSchoolExcelTemplate} from './roster-excel.mjs?v=2';
-import {renderFlexibleUpload} from './flexible-upload.mjs?v=13';
+import {renderFlexibleUpload} from './flexible-upload.mjs?v=15';
+import {aiSuggestedPoints,aiGradingCandidates} from './ai-grading-batch.mjs?v=1';
 import {checkClassBulkFinalize} from './bulk-finalize.mjs?v=2';
 import {AREA_KEYS,LEVELS,DEFAULT_RUBRIC,escapeHtml as esc,score,verifyRubric,assertClass,activeNumbers,parseMissingNumbers,genderRangesForClass,rangesForPages,parseCsv,toCsv,mergeRosterImport} from './core.mjs?v=2';
 
@@ -15,6 +16,7 @@ const ui={page:'dashboard',classNo:1,startNo:1,endNo:5,rosterClass:1,resultsClas
 const state={classes:[],roster:[],batches:[],submissions:[],rubric:structuredClone(DEFAULT_RUBRIC)};
 const pdfCache=new Map();
 let app,auth,db,storage,functions,teacher=null;
+let aiBatchTask=null;
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
 const labelFor={dashboard:'대시보드',upload:'PDF 업로드',results:'채점 현황',roster:'학생 명단',settings:'설정',grade:'답안 검토 및 채점'};
 const msgStatus={ready:'검토 대기',uploading:'업로드 중',failed:'업로드 오류'};
@@ -224,6 +226,18 @@ function renderUpload(){return renderFlexibleUpload({main,heading,state,ui,toast
 function renderResults(){
  const rows=state.submissions.filter(s=>ui.resultsClass==='all'||s.classNo===Number(ui.resultsClass));
  const bulk=ui.resultsClass==='all'?null:checkClassBulkFinalize(Number(ui.resultsClass),state.classes,state.roster,state.submissions);
+ const aiClassNo=ui.resultsClass==='all'?null:Number(ui.resultsClass);
+ const aiSixty=aiClassNo?aiGradingCandidates(state.submissions,aiClassNo,'sixty',state.rubric):[];
+ const aiPending=aiClassNo?aiGradingCandidates(state.submissions,aiClassNo,'pending',state.rubric):[];
+ const aiAll=aiClassNo?aiGradingCandidates(state.submissions,aiClassNo,'all',state.rubric):[];
+ const running=!!aiBatchTask?.running;
+ const taskLabel=aiBatchTask
+  ?(aiBatchTask.running?'진행 중':'작업 종료')+' · '+aiBatchTask.classNo+'반 · '+aiBatchTask.completed+'/'+aiBatchTask.total+'명 완료'
+   +(aiBatchTask.failed.length?' · 실패 '+aiBatchTask.failed.length+'명':'')
+   +(aiBatchTask.skipped?' · 제외 '+aiBatchTask.skipped+'명':'')
+   +(aiBatchTask.current?' · 처리 중 '+esc(aiBatchTask.current):'')
+   +(aiBatchTask.message?' · '+esc(aiBatchTask.message):'')
+  :'AI 채점을 실행하지 않았습니다. PDF가 저장된 학생을 대상으로 별도 비용으로 실행합니다.';
  const bulkHint=!bulk
   ?'반별 일괄 확정은 학급을 선택한 뒤 사용할 수 있습니다.'
   :bulk.blockers.length
@@ -231,8 +245,36 @@ function renderResults(){
    :bulk.pending.length
     ?bulk.classNo+'반 전체 '+bulk.students+'명 · 신원 확인 및 교사 점수 저장 완료 · 미확정 '+bulk.pending.length+'명을 일괄 확정할 수 있습니다.'
     :bulk.classNo+'반 전체 학생의 점수가 이미 확정되어 있습니다.';
- main(heading('GRADING STATUS','채점 현황','학생을 클릭하면 누락된 장을 제외한 1~5쪽 PDF와 AI·교사 채점을 함께 확인할 수 있습니다.',button('exportCsv','CSV 성적 내려받기','primary'))+
- `<div class="panel"><div class="panel-head"><h2>학생별 결과</h2><div class="toolbar"><select class="control" id="resultClass">${optsClass(ui.resultsClass,true)}</select>${button('refreshResults','새로고침')}${button('bulkFinalizeClass','선택 반 점수 일괄 확정','primary')}${button('deleteBatchBtn','업로드 묶음 삭제')}</div></div><p class="help-text" id="bulkFinalizeHint">${esc(bulkHint)}</p><div class="result-stats" style="margin-bottom:15px">표시 ${rows.length}명 · 확정 ${rows.filter(s=>s.finalized).length}명 · 확인 대기 ${rows.filter(s=>!s.identityConfirmed).length}명</div><div class="table-wrap"><table><thead><tr><th>학급</th><th>번호</th><th>이름</th><th>첫 장 확인</th><th>AI 채점</th><th>교사 점수</th><th>확정</th><th></th></tr></thead><tbody>${rows.map(s=>{const points=submissionGrade(s);return `<tr><td>${s.classNo}반</td><td><strong>${s.assignedNo}번</strong></td><td>${esc(studentName(s.classNo,s.assignedNo))}</td><td>${badge(s.identityConfirmed?'success':'warning',s.identityConfirmed?'교사 확인':'확인 필요')}</td><td>${badge(s.aiStatus==='AI 완료'?'success':'neutral',s.aiStatus||'미실행')}</td><td>${points?`<strong>${points.total}점</strong>`:'—'}</td><td>${badge(s.finalized?'success':'warning',s.finalized?'확정':'미확정')}</td><td><button class="btn link openSub" data-id="${s.id}">답안 검토</button></td></tr>`}).join('')||'<tr><td colspan="8" class="centered muted">해당 학생 답안이 없습니다.</td></tr>'}</tbody></table></div></div><div class="panel"><div class="panel-head"><h2>PDF 업로드 묶음</h2></div>${batchTable(state.batches.filter(b=>ui.resultsClass==='all'||b.classNo===Number(ui.resultsClass)))}</div>`);
+ main(heading('GRADING STATUS','채점 현황','저장된 PDF를 다시 올리지 않고 AI 채점만 실행할 수 있습니다. AI 점수는 제안이며 교사 점수와 별도로 관리됩니다.',button('exportCsv','CSV 성적 내려받기','primary'))+
+ `<div class="panel"><div class="panel-head"><h2>01. 저장된 PDF의 AI 채점·재채점</h2></div>
+ <p class="help-text">먼저 아래의 학급을 선택하세요. PDF 등록과 AI 채점은 분리되어 있습니다. AI 채점할 때만 학생별 PDF 이미지가 OpenAI API에 전송되며 요청마다 비용이 발생합니다. 교사가 저장하거나 확정한 점수는 AI 재채점으로 변경되지 않습니다.</p>
+ <div class="sub-actions">${button('aiBatchSixty','AI 제안 60점만 재채점 ('+aiSixty.length+'명)','primary')}
+ ${button('aiBatchPending','AI 미채점·오류만 실행 ('+aiPending.length+'명)')}
+ ${button('aiBatchAll','선택 반 AI 전체 재채점 ('+aiAll.length+'명)')}
+ ${button('aiBatchStop','진행 중인 AI 채점 중단')}</div>
+ <p class="help-text" id="aiBatchStatus" role="status">${taskLabel}</p>
+ <p class="thin-note">확정된 답안은 제외됩니다. 한 학생씩 순서대로 처리하며, 진행 중에는 이 브라우저 탭을 닫지 마세요. 중단해도 이미 완료된 학생의 AI 결과는 유지됩니다.</p>
+ </div>
+ <div class="panel"><div class="panel-head"><h2>02. 학생별 결과</h2><div class="toolbar"><select class="control" id="resultClass">${optsClass(ui.resultsClass,true)}</select>${button('refreshResults','새로고침')}${button('bulkFinalizeClass','선택 반 점수 일괄 확정','primary')}${button('deleteBatchBtn','업로드 묶음 삭제')}</div></div><p class="help-text" id="bulkFinalizeHint">${esc(bulkHint)}</p><div class="result-stats" style="margin-bottom:15px">표시 ${rows.length}명 · 확정 ${rows.filter(s=>s.finalized).length}명 · 확인 대기 ${rows.filter(s=>!s.identityConfirmed).length}명</div><div class="table-wrap"><table><thead><tr><th>학급</th><th>번호</th><th>이름</th><th>첫 장 확인</th><th>AI 상태</th><th>AI 제안 점수</th><th>교사 저장 점수</th><th>확정</th><th></th></tr></thead><tbody>${rows.map(s=>{const points=submissionGrade(s);return `<tr><td>${s.classNo}반</td><td><strong>${s.assignedNo}번</strong></td><td>${esc(studentName(s.classNo,s.assignedNo))}</td><td>${badge(s.identityConfirmed?'success':'warning',s.identityConfirmed?'교사 확인':'확인 필요')}</td><td>${badge(s.aiStatus==='AI 완료'?'success':'neutral',s.aiStatus||'미실행')}</td><td>${aiSuggestedPoints(s,state.rubric)?`<strong>${aiSuggestedPoints(s,state.rubric).total}점</strong>`:'—'}</td><td>${points?`<strong>${points.total}점</strong>`:'—'}</td><td>${badge(s.finalized?'success':'warning',s.finalized?'확정':'미확정')}</td><td><button class="btn link openSub" data-id="${s.id}">답안 검토</button><button class="btn link aiSingleGrade" data-id="${s.id}" ${s.finalized||s.status!=='ready'||running?'disabled':''}>AI ${s.aiGrade?'재채점':'채점'}</button></td></tr>`}).join('')||'<tr><td colspan="9" class="centered muted">해당 학생 답안이 없습니다.</td></tr>'}</tbody></table></div></div><div class="panel"><div class="panel-head"><h2>PDF 업로드 묶음</h2></div>${batchTable(state.batches.filter(b=>ui.resultsClass==='all'||b.classNo===Number(ui.resultsClass)))}</div>`);
+ $('aiBatchSixty').disabled=!aiClassNo||!aiSixty.length||running;
+ $('aiBatchPending').disabled=!aiClassNo||!aiPending.length||running;
+ $('aiBatchAll').disabled=!aiClassNo||!aiAll.length||running;
+ $('aiBatchStop').disabled=!running;
+ $('aiBatchSixty').onclick=()=>safe(()=>runAiBatch(aiClassNo,'sixty'));
+ $('aiBatchPending').onclick=()=>safe(()=>runAiBatch(aiClassNo,'pending'));
+ $('aiBatchAll').onclick=()=>safe(()=>runAiBatch(aiClassNo,'all'));
+ $('aiBatchStop').onclick=()=>{if(aiBatchTask?.running){aiBatchTask.stop=true;aiBatchTask.message='중단 요청됨. 현재 학생의 AI 분석이 끝나면 멈춥니다.';renderResults();}};
+ document.querySelectorAll('.aiSingleGrade').forEach(btn=>btn.onclick=()=>safe(async()=>{
+  if(aiBatchTask?.running)throw Error('반별 AI 채점 중입니다. 끝난 후 개별 실행하세요.');
+  const s=state.submissions.find(x=>x.id===btn.dataset.id);
+  if(!s||s.status!=='ready'||s.finalized)throw Error('저장 완료된 미확정 학생 답안만 AI 분석할 수 있습니다.');
+  if(!await ask('저장된 PDF AI 채점'+(s.aiGrade?' 다시 실행':''),
+   subFull(s)+' · 저장된 PDF '+(s.pageCount||'1~5')+'쪽을 OpenAI로 다시 보내 분석합니다. API 비용이 추가되며 기존 교사 저장 점수는 변경되지 않습니다. 실행하시겠습니까?','AI 채점 실행'))return;
+  btn.disabled=true;
+  try{await analyzeSubmission(s.id);toast(subFull(s)+' AI 채점 완료.');await nav('results');}
+  finally{if(btn.isConnected)btn.disabled=false;}
+ }));
+
  $('bulkFinalizeClass').disabled=!bulk?.ready;
  $('bulkFinalizeClass').title=bulk?.ready?'교사 점수·근거를 저장한 해당 반 미확정 학생의 점수를 일괄 확정':'등록된 학생 전원의 업로드·신원 확인·교사 점수 저장 완료 시 사용 가능';
  $('bulkFinalizeClass').onclick=()=>safe(async()=>{
@@ -266,6 +308,56 @@ function renderResults(){
  });
  $('resultClass').onchange=e=>{ui.resultsClass=e.target.value;renderResults()};$('refreshResults').onclick=()=>nav('results');document.querySelectorAll('.openSub').forEach(el=>el.onclick=()=>{ui.detailId=el.dataset.id;ui.pdfPage=1;nav('grade')});document.querySelectorAll('[data-batch]').forEach(el=>el.onclick=()=>{ui.resultsClass=String(el.dataset.class);renderResults()});$('exportCsv').onclick=()=>exportCsv();
  $('deleteBatchBtn').onclick=()=>safe(async()=>{const list=state.batches.filter(b=>ui.resultsClass==='all'||b.classNo===Number(ui.resultsClass));if(!list.length)throw Error('삭제할 업로드 묶음이 없습니다.');const id=window.prompt('삭제할 업로드 묶음 ID를 입력하세요.\n'+list.map(b=>`${b.classNo}반 ${b.startNo}~${b.endNo}번 : ${b.id}`).join('\n'));if(!id)return;const target=state.batches.find(b=>b.id===id);if(!target)throw Error('일치하는 묶음이 없습니다.');const subs=state.submissions.filter(s=>s.batchId===id);if(subs.some(s=>s.finalized))throw Error('확정된 답안이 있습니다. 먼저 확정을 취소하세요.');if(!await ask('답안 완전 삭제',`${target.classNo}반 ${target.startNo}~${target.endNo}번의 PDF와 채점 기록을 완전히 삭제합니다. 복구할 수 없습니다.`,'삭제'))return;for(const s of subs){try{await deleteObject(ref(storage,s.pdfPath))}catch(e){if(e.code!=='storage/object-not-found')throw e;}await deleteDoc(doc(db,'submissions',s.id));}await deleteDoc(doc(db,'batches',id));toast('업로드 묶음을 삭제했습니다.');await nav('results')});}
+async function runAiBatch(classNo,mode){
+ if(aiBatchTask?.running)throw Error('다른 AI 채점 일괄 작업이 진행 중입니다.');
+ if(!Number.isInteger(classNo)||!cBy(classNo))throw Error('채점 현황에서 학급을 먼저 선택하세요.');
+ await loadAll();
+ const candidates=aiGradingCandidates(state.submissions,classNo,mode,state.rubric);
+ if(!candidates.length)throw Error('선택한 조건에 해당하는 미확정 학생의 저장된 PDF가 없습니다.');
+ const titles={sixty:'기존 AI 제안 60점만 다시 채점',pending:'AI 미채점·오류 학생 채점',all:'선택 반 저장된 PDF 전체 AI 재채점'};
+ const teacherSaved=candidates.filter(s=>!!s.teacherGrade).length;
+ const message=classNo+'반 학생 '+candidates.length+'명 · '+titles[mode]+'. '
+  +'기존에 저장된 학생별 PDF를 OpenAI API에 다시 보내므로 '+candidates.length+'회 이상 API 과금이 발생합니다. '
+  +(teacherSaved?'이 중 '+teacherSaved+'명은 교사가 이미 점수를 저장했습니다. 그 점수는 그대로 두고 AI 제안만 새로 작성합니다. ':'')
+  +'확정된 학생은 대상에서 제외됩니다. 1명씩 순차 처리하며 브라우저 탭을 닫으면 중단될 수 있습니다. 진행하시겠습니까?';
+ if(!await ask('PDF 재등록 없이 AI 채점 실행',message,'AI 분석 시작'))return;
+ // 확인창을 연 뒤 다른 교사가 수정했을 가능성이 있으므로 다시 조회한다.
+ await loadAll();
+ const latest=aiGradingCandidates(state.submissions,classNo,mode,state.rubric);
+ const ids=candidates.map(s=>s.id);
+ if(ids.length!==latest.length||ids.some(id=>!latest.some(x=>x.id===id)))
+  throw Error('확인하는 사이 학생 채점 상태가 변경됐습니다. 다시 선택해 주세요.');
+ aiBatchTask={running:true,stop:false,classNo,mode,total:ids.length,completed:0,skipped:0,failed:[],current:'',message:''};
+ if(ui.page==='results')renderResults();
+ try{
+  for(const id of ids){
+   if(aiBatchTask.stop)break;
+   const sub=state.submissions.find(s=>s.id===id);
+   if(!sub||sub.status!=='ready'||sub.finalized){aiBatchTask.skipped++;continue;}
+   aiBatchTask.current=sub.assignedNo+'번';
+   aiBatchTask.message='저장된 PDF를 이용한 AI 채점 진행';
+   if(ui.page==='results')renderResults();
+   try{
+    await analyzeSubmission(id,{fromBatch:true});
+    aiBatchTask.completed++;
+   }catch(error){
+    aiBatchTask.failed.push({number:sub.assignedNo,error:String(error?.message||error).slice(0,160)});
+    // 실패한 학생만 건너뛰고 다른 학생의 이미 저장된 결과를 보존한다.
+   }
+   if(ui.page==='results')renderResults();
+  }
+ }finally{
+  aiBatchTask.current='';
+  aiBatchTask.message=aiBatchTask.stop?'교사 요청으로 중단했습니다. 실행된 학생 결과는 유지됩니다.':
+   aiBatchTask.failed.length?'일부 실패: '+aiBatchTask.failed.map(f=>f.number+'번').join(', ')+' · 개별 재시도 가능':
+   '완료. AI 제안 점수와 실제 답안을 확인한 뒤 교사 점수를 저장하세요.';
+  aiBatchTask.running=false;
+  if(ui.page==='results'){await loadAll();renderResults();}
+  toast(classNo+'반 AI 채점: 성공 '+aiBatchTask.completed+'명, 실패 '+aiBatchTask.failed.length+'명'+(aiBatchTask.stop?' (중단됨)':''),
+   !!aiBatchTask.failed.length);
+ }
+}
+
 function exportCsv(){const rows=state.submissions.filter(s=>ui.resultsClass==='all'||s.classNo===Number(ui.resultsClass));const out=[['반','번호','이름','첫장교사확인','AI상태','데이터수집분석','문제해결전략','알고리즘설계','총점','점수확정','데이터근거','전략근거','알고리즘근거','원본파일']];for(const s of rows){const pts=submissionGrade(s),g=s.teacherGrade;out.push([s.classNo,s.assignedNo,studentName(s.classNo,s.assignedNo),s.identityConfirmed?'완료':'미완료',s.aiStatus||'',pts?.data??'',pts?.strategy??'',pts?.algorithm??'',pts?.total??'',s.finalized?'확정':'미확정',g?.data?.reason||'',g?.strategy?.reason||'',g?.algorithm?.reason||'',s.sourceName])}download(`수행평가_채점결과_${ui.resultsClass==='all'?'전체':ui.resultsClass+'반'}.csv`,toCsv(out),'text/csv;charset=utf-8');}
 
 async function loadPdf(sub){if(pdfCache.has(sub.id))return pdfCache.get(sub.id);const pdfBlob=await getBlob(ref(storage,sub.pdfPath),22*1024*1024);const bytes=new Uint8Array(await pdfBlob.arrayBuffer());const pdf=await pdfjsLib.getDocument({data:bytes}).promise;if(pdf.numPages<1||pdf.numPages>5)throw Error('답안 PDF는 학생당 1~5쪽이어야 합니다.');pdfCache.set(sub.id,pdf);return pdf;}
