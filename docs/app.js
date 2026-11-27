@@ -8,7 +8,7 @@ import {firebaseConfig} from './firebase-config.js';
 import {readSchoolExcel,downloadSchoolExcelTemplate} from './roster-excel.mjs';
 import {renderFlexibleUpload} from './flexible-upload.mjs?v=12';
 import {checkClassBulkFinalize} from './bulk-finalize.mjs?v=1';
-import {AREA_KEYS,LEVELS,DEFAULT_RUBRIC,escapeHtml as esc,score,verifyRubric,assertClass,activeNumbers,parseMissingNumbers,genderRangesForClass,rangesForPages,parseCsv,toCsv} from './core.mjs';
+import {AREA_KEYS,LEVELS,DEFAULT_RUBRIC,escapeHtml as esc,score,verifyRubric,assertClass,activeNumbers,parseMissingNumbers,genderRangesForClass,rangesForPages,parseCsv,toCsv,mergeRosterImport} from './core.mjs?v=2';
 
 const $=id=>document.getElementById(id);
 const ui={page:'dashboard',classNo:1,startNo:1,endNo:5,rosterClass:1,resultsClass:'all',files:[],detailId:null,pdfPage:1,renderToken:0,busy:false};
@@ -48,15 +48,15 @@ function batchTable(list){if(!list.length)return '<div class="empty"><div class=
 let excelPending=null;
 function schoolExcelPanel(){
  return '<div class="panel excel-import-panel">'+
- '<div class="panel-head"><h2>엑셀로 학급·학생 명단 일괄 등록</h2><span class="tag info">1학년 전용</span></div>'+
- '<p class="thin-note">엑셀 첫 시트의 <strong>학년 · 반 · 번호 · 이름</strong>을 입력하면 각 반의 남학생(1~20번)·여학생(21번부터) 시작·끝 번호, 결번, 실제 학생 수를 자동 계산하고 이름까지 저장합니다.</p>'+
+ '<div class="panel-head"><h2>엑셀로 학급·학생 명단 추가·병합</h2><span class="tag info">1학년 전용</span></div>'+
+ '<p class="thin-note">엑셀의 <strong>학년 · 반 · 번호 · 이름</strong>을 기존 명단에 추가합니다. 처음 등록 시 빠뜨린 학생만 입력해도 됩니다. 이미 등록한 학생·PDF·채점 정보는 삭제하지 않습니다.</p>'+
  '<div class="toolbar excel-import-actions"><button type="button" class="btn secondary" id="downloadSchoolXlsx">↓ 엑셀 양식 다운로드 (.xlsx)</button>'+
  '<input type="file" class="control" id="schoolXlsx" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">'+
  '<button type="button" class="btn primary" id="previewSchoolXlsx">엑셀 검사·미리보기</button></div>'+
- '<p class="thin-note">해당 반의 <strong>재학생 전원</strong>을 입력해야 결번이 정확하게 계산됩니다. 번호가 없으면 그 번호를 결번으로 처리하며, 다른 반의 자료는 유지합니다.</p>'+
+ '<p class="thin-note">남학생 1~20번, 여학생 21번 이후 중 <strong>각각 등록된 첫 번호~마지막 번호 사이에서 비어 있는 번호만 결번</strong>으로 계산합니다. 기존 학생 + 새 학생을 합쳐 계산하며, 두 성별 구간 사이의 빈 번호는 결번으로 넣지 않습니다.</p>'+
  '<div id="excelPreview" class="excel-preview" role="status"></div>'+
- '<button type="button" class="btn primary" id="commitSchoolXlsx" disabled>확인 후 학급·명단 저장</button>'+
- '<p class="thin-note attention">학생 답안이 이미 등록된 학급의 명단 교체는 안전을 위해 차단합니다. 정식 학생 개인정보 사용 전 학교 보안 지침을 확인하세요.</p>'+
+ '<button type="button" class="btn primary" id="commitSchoolXlsx" disabled>확인 후 기존 명단에 추가 저장</button>'+
+ '<p class="thin-note attention">기존 명단과 같은 번호지만 이름이 다른 행은 자동으로 이름을 덮어쓰지 않습니다. 미리보기에서 충돌을 확인하고, 이름 수정은 학생 명단 관리에서 따로 진행하세요. 공용 PC에서는 학생 파일을 안전하게 관리하세요.</p>'+
  '</div>';
 }
 function bindSchoolExcelPanel(){
@@ -67,52 +67,54 @@ function bindSchoolExcelPanel(){
  fileInput.onchange=()=>{excelPending=null;commitBtn.disabled=true;area.textContent='';};
  previewBtn.onclick=()=>safe(async()=>{
   const file=fileInput.files?.[0];if(!file)throw Error('엑셀(.xlsx) 파일을 먼저 선택하세요.');
-  previewBtn.disabled=true;area.textContent='엑셀을 읽어 학급·결번·인원을 계산하고 있습니다…';
+  previewBtn.disabled=true;area.textContent='기존 명단과 엑셀을 합쳐 남녀 번호 구간 및 결번을 계산하는 중입니다…';
   try{
+   await loadAll();
    const incoming=await readSchoolExcel(file);
-   const affected=new Set(incoming.classes.map(x=>x.classNo));
-   if(new Set([...state.classes.map(c=>c.classNo),...affected]).size>50)throw Error('저장된 학급과 합쳐서 50개 반을 초과합니다.');
-   const allNew=new Map(incoming.students.map(x=>[x.classNo+'-'+x.number,x]));
-   const removed=state.roster.filter(x=>affected.has(x.classNo)&&!allNew.has(x.classNo+'-'+x.number));
-   const changed=incoming.students.filter(x=>{const old=student(x.classNo,x.number);return old&&old.name!==x.name;});
-   const newCount=incoming.students.filter(x=>!student(x.classNo,x.number)).length;
-   const locked=state.submissions.filter(x=>affected.has(x.classNo));
+   const merged=mergeRosterImport(state.roster,incoming.students,state.submissions);
+   if(new Set([...state.classes.map(c=>c.classNo),...merged.affected]).size>50)throw Error('저장된 학급과 합쳐서 50개 반을 초과합니다.');
    const cell=v=>v??'—';
-   const rows=incoming.classes.map(c=>
-     '<tr><td>'+c.gradeNo+'학년 '+c.classNo+'반</td><td>'+cell(c.boysStart)+'</td><td>'+cell(c.boysEnd)+'</td>'+
-     '<td>'+cell(c.girlsStart)+'</td><td>'+cell(c.girlsEnd)+'</td><td>'+c.missingNos.join(', ')+'</td>'+
-     '<td><strong>'+activeNumbers(c).length+'명</strong></td></tr>').join('');
-   area.innerHTML='<div class="result-stats">엑셀 '+incoming.students.length+'명 · '+incoming.classes.length+'개 반 · 신규 '+newCount+'명 · 이름 변경 '+changed.length+'명 · 기존 명단에서 제외 '+removed.length+'명</div>'+
-    '<div class="table-wrap"><table class="small-table"><thead><tr><th>학급</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>결번</th><th>학생 수</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-    (locked.length?'<p class="notice warn">이미 답안이 등록된 학급이 있습니다. 해당 학급의 명단은 엑셀로 교체할 수 없습니다.</p>':
-    (removed.length||changed.length?'<p class="notice warn">기존 학생 이름 '+changed.length+'건이 수정되고 '+removed.length+'건이 삭제될 예정입니다. 반드시 전체 명단인지 확인하세요.</p>':
-    '<p class="notice good">학생별 번호가 중복되지 않으며 명단을 등록할 수 있습니다.</p>'));
-   excelPending={...incoming,filename:file.name};
-   commitBtn.disabled=locked.length>0;
+   const rows=merged.classes.map(c=>
+    '<tr><td>1학년 '+c.classNo+'반</td><td>'+cell(c.boysStart)+'</td><td>'+cell(c.boysEnd)+'</td>'+
+    '<td>'+cell(c.girlsStart)+'</td><td>'+cell(c.girlsEnd)+'</td>'+
+    '<td>'+((c.missingNos||[]).length?c.missingNos.join(', '):'없음')+'</td>'+
+    '<td><strong>'+activeNumbers(c).length+'명</strong></td></tr>').join('');
+   area.innerHTML='<div class="result-stats">엑셀 '+incoming.students.length+'명 · 신규 '+merged.added.length+'명 · 기존 번호 유지 '+merged.unchanged.length+'명 · 이름 충돌(기존 유지) '+merged.conflicts.length+'명 · 기존 답안 유지</div>'+
+    '<div class="table-wrap"><table class="small-table"><thead><tr><th>학급</th><th>남 시작</th><th>남 끝</th><th>여 시작</th><th>여 끝</th><th>남녀 구간 내 결번</th><th>합산 학생 수</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    (merged.added.length?'<p class="notice good">신규 학생 '+merged.added.map(s=>s.classNo+'반 '+s.number+'번 '+esc(s.name)).join(', ')+'을(를) 추가할 수 있습니다. 기존 학생·답안은 보존됩니다.</p>':
+     '<p class="notice">추가할 신규 학생이 없습니다. 학급 번호 구간·결번만 기존 명단 기준으로 재계산할 수 있습니다.</p>')+
+    (merged.conflicts.length?'<p class="notice warn">이름 충돌(기존 유지): '+merged.conflicts.map(s=>s.classNo+'반 '+s.number+'번 [기존 '+esc(s.existingName)+' / 엑셀 '+esc(s.incomingName)+']').join(', ')+'</p>':'');
+   excelPending={students:incoming.students,filename:file.name};
+   commitBtn.disabled=false;
   }catch(e){excelPending=null;commitBtn.disabled=true;area.textContent='엑셀 확인 실패: '+e.message;throw e;}
   finally{previewBtn.disabled=false;}
  });
  commitBtn.onclick=()=>safe(async()=>{
-  const incoming=excelPending;if(!incoming)throw Error('엑셀 검사·미리보기를 먼저 실행하세요.');
+  const pending=excelPending;if(!pending)throw Error('엑셀 검사·미리보기를 먼저 실행하세요.');
   commitBtn.disabled=true;
   try{
    await loadAll();
-   const affected=new Set(incoming.classes.map(x=>x.classNo));
-   if(state.submissions.some(s=>affected.has(s.classNo)))throw Error('해당 학급에 이미 답안이 있어 명단 교체를 차단했습니다.');
-   if(new Set([...state.classes.map(c=>c.classNo),...affected]).size>50)throw Error('최대 50개 학급까지 등록할 수 있습니다.');
-   const incomingById=new Map(incoming.students.map(x=>[x.classNo+'-'+x.number,x]));
-   const removed=state.roster.filter(x=>affected.has(x.classNo)&&!incomingById.has(x.classNo+'-'+x.number));
-   const changed=incoming.students.filter(x=>{const old=student(x.classNo,x.number);return !old||old.name!==x.name;});
-   const opCount=incoming.classes.length+removed.length+changed.length;
-   if(opCount>450)throw Error('한 번에 변경할 자료가 450건을 초과합니다. 반별로 엑셀을 나눠 등록해 주세요.');
-   const question='엑셀에 포함된 '+incoming.classes.length+'개 반, 학생 '+incoming.students.length+'명을 기준으로 학급 범위·결번·명단을 설정합니다. 기존 이름 '+removed.length+'건이 삭제되고 '+changed.length+'건이 추가·변경됩니다. 입력한 파일이 해당 반의 전체 학생 명단이 맞습니까?';
-   if(!await ask('엑셀 일괄 등록 확인',question,'학급·명단 저장'))return;
+   const merged=mergeRosterImport(state.roster,pending.students,state.submissions);
+   if(new Set([...state.classes.map(c=>c.classNo),...merged.affected]).size>50)throw Error('최대 50개 학급까지 등록할 수 있습니다.');
+   const opCount=merged.classes.length+merged.added.length;
+   if(opCount>450)throw Error('한 번에 저장할 자료가 450건을 초과합니다. 반별로 엑셀을 나눠 등록해 주세요.');
+   const question='기존 명단과 답안은 삭제·덮어쓰지 않고, '+merged.classes.length+'개 반에 신규 '+merged.added.length+'명만 추가합니다. '
+    +'중복 번호 '+merged.unchanged.length+'명은 유지, 이름 충돌 '+merged.conflicts.length+'건도 기존 이름을 유지합니다. '
+    +'남학생·여학생 각각의 첫 번호~마지막 번호 내 결번을 다시 계산합니다. 저장하시겠습니까?';
+   if(!await ask('기존 명단에 엑셀 추가·병합',question,'추가 저장'))return;
+   // 확인창 이후에도 변경된 학생·답안이 없도록 다시 조회하고 병합한다.
+   await loadAll();
+   const latest=mergeRosterImport(state.roster,pending.students,state.submissions);
+   if(JSON.stringify(latest.classes)!==JSON.stringify(merged.classes)||
+      JSON.stringify(latest.added)!==JSON.stringify(merged.added))
+    throw Error('확인 중 다른 명단 변경이 발견되었습니다. 엑셀 미리보기를 다시 실행해 주세요.');
    const batch=writeBatch(db);
-   for(const c of incoming.classes)batch.set(doc(db,'classes',String(c.classNo)),c);
-   for(const x of removed)batch.delete(doc(db,'roster',x.classNo+'-'+x.number));
-   for(const x of changed)batch.set(doc(db,'roster',x.classNo+'-'+x.number),{gradeNo:1,classNo:x.classNo,number:x.number,name:x.name});
+   for(const c of latest.classes)batch.set(doc(db,'classes',String(c.classNo)),c);
+   for(const x of latest.added)batch.set(doc(db,'roster',x.classNo+'-'+x.number),
+    {gradeNo:1,classNo:x.classNo,number:x.number,name:x.name});
    await batch.commit();
-   excelPending=null;toast('엑셀 등록 완료: '+incoming.classes.length+'개 반 · '+incoming.students.length+'명 (결번 자동 반영)');
+   excelPending=null;
+   toast('기존 명단 유지 · 신규 '+latest.added.length+'명 추가 · '+latest.classes.length+'개 반 결번 재계산 완료');
    await nav('roster');
   }finally{if($('commitSchoolXlsx'))$('commitSchoolXlsx').disabled=!excelPending;}
  });
