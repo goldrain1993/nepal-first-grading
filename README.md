@@ -220,3 +220,20 @@ node --check functions/index.js
 - [Firebase Storage 브라우저 PDF/CORS](https://firebase.google.com/docs/storage/web/download-files)
 - [Firebase Cloud Functions 호출형 함수](https://firebase.google.com/docs/functions/callable)
 - [GitHub Pages 배포](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site)
+
+## 2026-11-27 선택 학생 재채점 및 9개 근거 검증
+
+채점 현황의 학생별 결과에서 체크박스를 선택해 전체선택/전체해제 또는 선택 학생 AI 재채점을 실행할 수 있습니다. 특정 점수(60점 등)만 대상으로 하는 기능은 제거했습니다. PDF 등록, 원본 저장, AI 제안, 교사 저장 점수, 교사 최종 확정은 독립적으로 유지합니다.
+
+### 배포 주의: AI 함수는 GitHub Pages에 자동 배포되지 않습니다
+
+웹 화면은 GitHub Pages이지만 실제 AI 재채점은 Firebase Cloud Functions의 새 `gradeAnswerV2` 함수가 수행합니다. 예전 `gradeAnswer` 함수로 잘못된 채점이 재실행되는 것을 방지하기 위해 함수 이름을 분리했습니다. 다음을 저장소 루트에서 실행해야 새 채점 기능이 작동합니다.
+
+```bash
+npm --prefix functions install
+firebase deploy --project javacafetest06-ef7d9 --only functions:gradeAnswerV2
+```
+
+기존 `inspectPages`와 과거 `gradeAnswer`는 위 명령으로 변경하지 않습니다. 서버 배포 전에 새 웹 화면에서 AI 재채점하면 함수 없음 오류가 표시되며, 학생 PDF와 교사 확정 점수는 그대로 보존됩니다. 웹 화면과 함수가 모두 반영됐는지 확인한 뒤 소수 학생의 답안 원본·성취수준·9개 근거를 교사가 대조하세요.
+
+서버는 data(40점) / strategy(30점) / algorithm(30점)의 기존 학교 설정 배점을 바꾸지 않고 각 영역의 3가지 세부 요소별 원본 페이지, 손글씨 관찰, 충족 수준을 필수로 요구합니다. 페이지 누락 또는 판독불가를 미제출로 오인하지 않으며, 불확실한 결과의 자동 점수는 보류합니다. 동일한 점수 자체를 오류로 보거나 점수 분포를 임의 조정하지 않습니다.
